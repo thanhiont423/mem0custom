@@ -1,0 +1,54 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.0
+    container_name: memory-qdrant
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    restart: unless-stopped
+    networks: [memnet]
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: memory-postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: mem0
+      POSTGRES_USER: mem0
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks: [memnet]
+
+  archive-api:
+    build: ./archive-api
+    container_name: memory-archive-api
+    environment:
+      DB_URL: postgresql://mem0:${POSTGRES_PASSWORD}@postgres/mem0
+      ARCHIVE_AUTH_TOKEN: ${ARCHIVE_AUTH_TOKEN}
+    networks: [memnet]
+    depends_on: [postgres]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8
+    container_name: memory-caddy
+    ports:
+      - "80:80"
+      # Use 8443:443 if sharing port 443 with sslh (corp-proxy SSH setup)
+      # Use 443:443 if SSH not on 443
+      - "8443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data
+    environment:
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+    restart: unless-stopped
+    networks: [memnet]
+    depends_on: [qdrant, archive-api]
+
+networks:
+  memnet:
+    driver: bridge

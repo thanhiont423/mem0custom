@@ -1,0 +1,32 @@
+claude.hangocthanh.io.vn {
+    encode gzip
+
+    handle /qdrant/* {
+        @authorized header api-key "{env.MCP_BEARER_TOKEN}"
+        handle @authorized {
+            uri strip_prefix /qdrant
+            reverse_proxy qdrant:6333 {
+                header_up api-key {env.QDRANT_API_KEY}
+            }
+        }
+        respond "Unauthorized" 401
+    }
+
+    handle /archive/* {
+        uri strip_prefix /archive
+        reverse_proxy archive-api:8001
+    }
+
+    handle /health {
+        respond "ok" 200
+    }
+
+    handle {
+        respond "Not Found" 404
+    }
+
+    log {
+        output file /data/access.log
+        format json
+    }
+}
