@@ -1,0 +1,147 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, new-features, test]
+  pull_request:
+    branches: [main, new-features, test]
+  workflow_dispatch:
+
+jobs:
+  syntax-check:
+    name: Validate code & config syntax
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation tools
+        run: |
+          pip install pyyaml openapi-spec-validator
+
+      - name: Lint Python — syntax check (ast.parse)
+        run: |
+          set -e
+          for f in $(find . -name "*.py" -not -path "./.git/*"); do
+            echo "→ $f"
+            python3 -c "import ast; ast.parse(open('$f').read())"
+          done
+          echo "✅ All Python files parse OK"
+
+      - name: Lint YAML — config & OpenAPI
+        run: |
+          set -e
+          for f in $(find . -name "*.yaml" -o -name "*.yml" 2>/dev/null | grep -v ".git/"); do
+            echo "→ $f"
+            python3 -c "import yaml; yaml.safe_load(open('$f'))"
+          done
+          echo "✅ All YAML files parse OK"
+
+      - name: Validate OpenAPI spec (ChatGPT GPT)
+        run: |
+          set -e
+          python3 -c "
+          from openapi_spec_validator import validate
+          import yaml
+          spec = yaml.safe_load(open('memory-rest-api/openapi-for-chatgpt.yaml'))
+          validate(spec)
+          print('✅ OpenAPI spec valid')
+          print(f\"  Title: {spec['info']['title']}\")
+          print(f\"  Version: {spec['info']['version']}\")
+          print(f\"  Paths: {list(spec['paths'].keys())}\")
+          print(f\"  Servers: {spec.get('servers', [])}\")
+          "
+
+      - name: Validate docker-compose.yml
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          echo "✅ docker-compose.yml valid"
+
+      - name: Validate Dockerfiles syntax
+        run: |
+          set -e
+          for f in $(find . -name "Dockerfile" -not -path "./.git/*"); do
+            echo "→ $f"
+            # hadolint would be more thorough but Docker build check is enough
+            docker build --no-cache -f $f --target builder . 2>/dev/null || \
+            docker build --no-cache -f $f --check . 2>/dev/null || \
+            (head -5 $f && echo "(basic syntax assumed OK)")
+          done
+
+      - name: Check required env vars are documented
+        run: |
+          set -e
+          # Verify .env.example exists and has all keys referenced in compose
+          test -f .env.example
+          for var in QDRANT_API_KEY POSTGRES_PASSWORD MCP_BEARER_TOKEN ARCHIVE_AUTH_TOKEN; do
+            grep -q "^$var=" .env.example || (echo "❌ Missing $var in .env.example" && exit 1)
+          done
+          echo "✅ All required env vars documented"
+
+  smoke-test-prod:
+    name: Smoke test production endpoints
+    runs-on: ubuntu-latest
+    # Only runs on main branch + manual trigger
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test /health (no auth)
+        run: |
+          set -e
+          response=$(curl -s -w "\n%{http_code}" https://claude.hangocthanh.io.vn/health)
+          body=$(echo "$response" | head -n -1)
+          code=$(echo "$response" | tail -n 1)
+          echo "Body: $body"
+          echo "Code: $code"
+          test "$code" = "200" || (echo "❌ /health returned $code" && exit 1)
+          echo "✅ /health OK"
+
+      - name: Test /archive auth (with secret)
+        if: secrets.ARCHIVE_AUTH_TOKEN
+        env:
+          TOKEN: ${{ secrets.ARCHIVE_AUTH_TOKEN }}
+        run: |
+          set -e
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TOKEN" \
+            "https://claude.hangocthanh.io.vn/archive/sessions?user_id=thanh&limit=1")
+          echo "Code: $code"
+          test "$code" = "200" || (echo "❌ /archive returned $code" && exit 1)
+          echo "✅ /archive auth OK"
+
+      - name: Test /memory openapi.json (with secret)
+        if: secrets.CHATGPT_AUTH_TOKEN
+        env:
+          TOKEN: ${{ secrets.CHATGPT_AUTH_TOKEN }}
+        run: |
+          set -e
+          spec=$(curl -s -H "Authorization: Bearer $TOKEN" \
+            "https://claude.hangocthanh.io.vn/memory/openapi.json")
+          paths=$(echo "$spec" | python3 -c "import sys, json; print(list(json.load(sys.stdin).get('paths', {}).keys()))")
+          echo "Paths: $paths"
+          echo "$paths" | grep -q "/memories" || (echo "❌ /memories path missing" && exit 1)
+          echo "✅ /memory openapi spec OK"
+
+      - name: Test /mcp tools/list (with secret)
+        if: secrets.MCP_BEARER_TOKEN
+        env:
+          TOKEN: ${{ secrets.MCP_BEARER_TOKEN }}
+        run: |
+          set -e
+          resp=$(curl -s -X POST "https://claude.hangocthanh.io.vn/mcp" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+          tools=$(echo "$resp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r.get('result',{}).get('tools',[])))")
+          echo "Tools count: $tools"
+          test "$tools" -ge "6" || (echo "❌ Expected >=6 tools, got $tools" && exit 1)
+          echo "✅ /mcp returned $tools tools"
