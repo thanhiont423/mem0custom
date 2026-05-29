@@ -14,6 +14,58 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+// ---------- Default config files (embedded at compile-time) ----------
+const DEFAULT_INSTRUCTION_MD: &str = include_str!("../../../instruction.md.sample");
+const DEFAULT_KEYWORDS_JSON: &str = include_str!("../../../keywords.json.sample");
+const DEFAULT_README_DATA: &str = r#"# Data folder — ChatGPT Desktop
+
+Folder này chứa tất cả data của app. Backup folder = backup toàn bộ.
+
+## Files cấu hình (user có thể sửa)
+- instruction.md  : System prompt gắn vào mỗi session JSON
+- keywords.json   : Mapping keyword -> action (compact, lưu, ...)
+
+## Files runtime (app tự manage)
+- current.session : Metadata session đang chạy
+- current.wal     : Write-ahead log
+- sessions/*.json : File output từng phiên chat
+- logs/app.log    : Debug log
+
+## Trigger compact
+
+Gõ keyword (xem keywords.json) vào textarea ChatGPT + Enter.
+Mặc định: compact, lưu, luu, save, xuat, /c, /save
+
+App chặn không gửi lên OpenAI, xuất file JSON vào sessions/.
+
+Sửa file -> Ctrl+R reload page -> active.
+"#;
+
+/// Tự tạo file mẫu nếu chưa tồn tại trong root_dir. Gọi 1 lần khi init_session.
+fn ensure_default_configs(app: &AppHandle) {
+    let root = match root_dir(app) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+
+    let files: &[(&str, &str)] = &[
+        ("instruction.md", DEFAULT_INSTRUCTION_MD),
+        ("keywords.json", DEFAULT_KEYWORDS_JSON),
+        ("README.md", DEFAULT_README_DATA),
+    ];
+
+    for (name, content) in files {
+        let path = root.join(name);
+        if !path.exists() {
+            match fs::write(&path, content) {
+                Ok(_) => info!("[config] created default {}", path.display()),
+                Err(e) => error!("[config] failed to create {}: {}", path.display(), e),
+            }
+        }
+    }
+}
+
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct LoggedMessage {
     pub id: String,
@@ -202,6 +254,7 @@ fn make_session_id(seed: u64) -> String {
 
 pub fn init_session(app: &AppHandle, state: &HistoryState) -> Result<SessionMeta, String> {
     info!("[history] init_session starting");
+    ensure_default_configs(app);
     let meta_path = session_meta_path(app)?;
     let wal = wal_path(app)?;
 
