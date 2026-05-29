@@ -27,6 +27,9 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: python test_history_logic.py
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: '1'
 
   build-windows:
     name: Build Windows installer
@@ -333,6 +336,9 @@ jobs:
 
       - name: Run deep validation script
         shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: '1'
         run: |
           $exeDir = (Get-Item (Get-ChildItem -Path ./exe -Filter "*.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName)).Directory.FullName
           pwsh -File tests/validate_release.ps1 -ExeDir $exeDir

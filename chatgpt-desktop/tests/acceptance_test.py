@@ -13,6 +13,14 @@ Chạy: python3 acceptance_test.py [path-to-installed-app-data-dir]
 Mặc định: %APPDATA%\\com.nofwl.chatgpt (Windows) hoặc ~/.config/com.nofwl.chatgpt (Linux/Mac)
 """
 
+import io
+import sys
+
+# Force UTF-8 stdout (Windows mặc định cp1252 không in được ký tự tiếng Việt)
+if sys.platform.startswith("win") and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import json
 import os
 import re
@@ -175,6 +183,6 @@ class AcceptanceCriteria(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    print(f"Kiểm tra app data dir: {APP_DATA}")
-    print(f"Phiên bản: ChatGPT Desktop v0.1.0\n")
+    print(f"App data dir: {APP_DATA}")
+    print(f"Version: ChatGPT Desktop v0.2.0\n")
     unittest.main(argv=[sys.argv[0]], verbosity=2)
