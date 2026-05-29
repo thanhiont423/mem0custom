@@ -13,6 +13,11 @@ pub static SCRIPT_ASK: &[u8] = include_bytes!("../../scripts/ask.js");
 pub static SCRIPT_CHAT_LOGGER: &[u8] = include_bytes!("../../scripts/chat-logger.js");
 
 /// Struct representing the template with the script data.
+///
+/// Note: `ask` và `chat_logger` chỉ giữ data trong RAM cho debug — không đọc ở đâu trong runtime
+/// (script được copy ra disk qua `update_or_create_file` rồi load lại bằng `AppConf::load_script`).
+/// Suppress dead_code warning vì pattern này là intentional.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Template {
     pub ask: Vec<u8>,
@@ -159,15 +164,4 @@ fn update_or_create_file<P: AsRef<Path>>(filename: P, new_data: &[u8]) -> Result
                     Ok(true)
                 }
                 (None, _) => {
-                    // If there is an error reading new version info, don't update the file
-                    Ok(false)
-                }
-            }
-        }
-        Err(_) => {
-            // If there is an error reading the current file, create a new file
-            write_file_contents(filename, new_data)?;
-            Ok(true)
-        }
-    }
-}
+                    // If there is an error 
