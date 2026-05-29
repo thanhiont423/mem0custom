@@ -133,4 +133,60 @@ async def call_tool(name, args):
             return [TextContent(type="text", text=r.text)]
 
         if name == "get_session_summary":
-            r = await c.get(f"{ARCHIVE_URL}/sessions/{args['sess
+            r = await c.get(f"{ARCHIVE_URL}/sessions/{args['session_id']}")
+            data = r.json()
+            transcript = data.get("transcript") or []
+            compact = {
+                "id": data["id"],
+                "started_at": data["started_at"],
+                "ended_at": data.get("ended_at"),
+                "project_tag": data.get("project_tag"),
+                "summary": data.get("llm_summary") or data.get("summary"),
+                "message_count": data["message_count"],
+                "first_messages": transcript[:5],
+                "last_messages": transcript[-5:] if len(transcript) > 5 else [],
+            }
+            return [TextContent(
+                type="text",
+                text=json.dumps(compact, ensure_ascii=False, indent=2),
+            )]
+
+        if name == "get_old_session":
+            r = await c.get(f"{ARCHIVE_URL}/sessions/{args['session_id']}")
+            return [TextContent(type="text", text=r.text)]
+
+        if name == "search_old_sessions":
+            r = await c.get(
+                f"{ARCHIVE_URL}/sessions",
+                params={"user_id": USER_ID, "q": args["q"], "limit": 20},
+            )
+            return [TextContent(type="text", text=r.text)]
+
+        if name == "search_old_sessions_semantic":
+            r = await c.get(
+                f"{ARCHIVE_URL}/sessions/search-semantic",
+                params={"user_id": USER_ID, "q": args["q"],
+                        "limit": args.get("limit", 10)},
+            )
+            return [TextContent(type="text", text=r.text)]
+
+        if name == "load_context_for_continuation":
+            params = {"strategy": args.get("strategy", "compressed")}
+            if "query" in args:
+                params["query"] = args["query"]
+            r = await c.get(
+                f"{ARCHIVE_URL}/sessions/{args['session_id']}/context",
+                params=params,
+            )
+            return [TextContent(type="text", text=r.text)]
+
+        return [TextContent(type="text", text=f"unknown tool {name}")]
+
+
+async def main():
+    async with stdio_server() as (r, w):
+        await server.run(r, w, server.create_initialization_options())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
