@@ -159,4 +159,19 @@ jobs:
           echo "$paths" | grep -q "/memories"
           echo "✅ /memory openapi OK"
 
-      - name: Test /mcp tool
+      - name: Test /mcp tools/list (requires MCP_BEARER_TOKEN secret)
+        env:
+          TOKEN: ${{ secrets.MCP_BEARER_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "⊘ Skipped (MCP_BEARER_TOKEN not set)"
+            exit 0
+          fi
+          resp=$(curl -s -X POST "https://claude.hangocthanh.io.vn/mcp" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+          tools=$(echo "$resp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r.get('result',{}).get('tools',[])))")
+          echo "Tools count: $tools"
+          test "$tools" -ge "6"
+          echo "✅ /mcp returned $tools tools"
