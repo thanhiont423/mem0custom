@@ -128,7 +128,6 @@ fn create_dir<P: AsRef<Path>>(filename: P) -> Result<()> {
 fn update_or_create_file<P: AsRef<Path>>(filename: P, new_data: &[u8]) -> Result<bool> {
     let filename = filename.as_ref();
 
-    // Ensure directory exists
     create_dir(filename)?;
 
     let current_data = read_file_contents(filename);
@@ -152,16 +151,22 @@ fn update_or_create_file<P: AsRef<Path>>(filename: P, new_data: &[u8]) -> Result
                         || Version::parse(new_version)? > Version::parse(current_version)?
                     {
                         write_file_contents(filename, new_data)?;
-                        info!("{} → {}", current_version, new_version);
+                        info!("{} -> {}", current_version, new_version);
                         Ok(true)
                     } else {
                         Ok(false)
                     }
                 }
-                // If there is an error reading current version info, update the file
                 (Some(_), Err(_)) => {
                     write_file_contents(filename, new_data)?;
                     Ok(true)
                 }
-                (None, _) => {
-                    // If there is an error 
+                (None, _) => Ok(false),
+            }
+        }
+        Err(_) => {
+            write_file_contents(filename, new_data)?;
+            Ok(true)
+        }
+    }
+}
