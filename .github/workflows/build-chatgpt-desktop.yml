@@ -124,9 +124,24 @@ jobs:
         run: pnpm tauri info
         continue-on-error: true
 
-      - name: Build Tauri release (explicit bundles)
+      - name: Build Tauri release (rely on config bundle.targets)
         shell: pwsh
-        run: pnpm tauri build --verbose --bundles nsis,msi
+        run: |
+          Write-Host "==> Starting pnpm tauri build..."
+          Write-Host "Working dir: $(Get-Location)"
+          Write-Host "tauri.conf.json bundle.targets:"
+          Get-Content src-tauri/tauri.conf.json | Select-String -Pattern 'targets'
+          Write-Host ""
+          Write-Host "==> pnpm tauri build --verbose"
+          pnpm tauri build --verbose
+          $exitCode = $LASTEXITCODE
+          Write-Host ""
+          Write-Host "==> tauri build exit code: $exitCode"
+          if ($exitCode -ne 0) {
+            Write-Error "tauri build FAILED with exit code $exitCode"
+            exit $exitCode
+          }
+          Write-Host "PASS tauri build completed"
 
       - name: Diagnostic — dump release/ + bundle/
         if: always()
