@@ -51,21 +51,33 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Install WiX Toolset 3.14 (cần cho MSI bundling)
+      - name: Ensure WiX Toolset available
         shell: pwsh
         run: |
-          choco install wixtoolset --version=3.14.0 --no-progress --yes
-          # Add WiX bin to PATH for current job
-          $wix = "${env:WIX}bin"
-          if (-not $wix -or -not (Test-Path $wix)) {
-            $wix = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
+          # Check WiX đã có chưa (windows-latest thường đã preinstalled)
+          $candidates = @(
+            "C:\Program Files (x86)\WiX Toolset v3.14\bin",
+            "C:\Program Files (x86)\WiX Toolset v3.11\bin",
+            "${env:WIX}bin"
+          )
+          $wixBin = $null
+          foreach ($p in $candidates) {
+            if ($p -and (Test-Path "$p\candle.exe")) { $wixBin = $p; break }
           }
-          Write-Host "WiX bin: $wix"
-          if (Test-Path "$wix\candle.exe") {
-            echo "$wix" >> $env:GITHUB_PATH
-            Write-Host "PASS: WiX candle.exe found, added to PATH"
+          if (-not $wixBin) {
+            Write-Host "WiX chưa có, đang install qua choco..."
+            choco install wixtoolset --no-progress --yes --force
+            $wixBin = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
+            if (-not (Test-Path "$wixBin\candle.exe")) {
+              $wixBin = "C:\Program Files (x86)\WiX Toolset v3.11\bin"
+            }
+          }
+          if (Test-Path "$wixBin\candle.exe") {
+            Write-Host "PASS WiX bin: $wixBin"
+            & "$wixBin\candle.exe" -? | Select-Object -First 1
+            echo "$wixBin" >> $env:GITHUB_PATH
           } else {
-            Write-Warning "WiX bin folder không tìm thấy — MSI có thể không build được"
+            Write-Warning "WiX bin không tìm thấy — MSI sẽ không build được, fallback NSIS"
           }
 
       - name: Cache Cargo registry + target
