@@ -311,7 +311,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ChatGPT-exe-portable
-          path: ./exe
+          path: chatgpt-desktop/exe
 
       - name: Run portable exe, capture lifecycle (auto-portable mode)
         shell: pwsh
@@ -343,8 +343,8 @@ jobs:
         with:
           name: app-log-from-validation
           path: |
-            ./exe/data/com.nofwl.chatgpt/logs/*.log
-            **/com.nofwl.chatgpt/logs/*.log
+            chatgpt-desktop/exe/data/com.nofwl.chatgpt/logs/*.log
+            chatgpt-desktop/**/com.nofwl.chatgpt/logs/*.log
           if-no-files-found: warn
 
   release:
