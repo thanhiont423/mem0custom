@@ -40,7 +40,6 @@
     "os:allow-version",
     "os:allow-os-type",
     "os:default",
-    "shell:default",
-    "log:default"
+    "shell:default"
   ]
 }

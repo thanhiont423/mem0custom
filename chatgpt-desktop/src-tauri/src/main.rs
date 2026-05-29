@@ -2,26 +2,59 @@
 
 mod core;
 use core::{cmd, history::{HistoryState, LoggedMessage}, setup, window};
+use simplelog::{ColorChoice, CombinedLogger, Config, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, WriteLogger};
+use std::fs::OpenOptions;
 use tauri::{Listener, Manager};
-use tauri_plugin_log::{Target, TargetKind};
+
+fn init_logger() {
+    // Log file ở cạnh root_dir (auto-portable hoặc AppData)
+    // Lấy đường dẫn trước khi Tauri start vì cần log ngay
+    let log_dir = {
+        let exe = std::env::current_exe().ok();
+        let exe_dir = exe.as_ref().and_then(|p| p.parent()).map(|p| p.to_path_buf());
+
+        let portable_data = exe_dir.as_ref().map(|d| d.join("data").join("com.nofwl.chatgpt").join("logs"));
+        let portable_works = portable_data
+            .as_ref()
+            .map(|d| std::fs::create_dir_all(d).is_ok())
+            .unwrap_or(false);
+
+        if portable_works {
+            portable_data.unwrap()
+        } else {
+            // Fallback APPDATA
+            let base = std::env::var("APPDATA")
+                .ok()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let p = base.join("com.nofwl.chatgpt").join("logs");
+            let _ = std::fs::create_dir_all(&p);
+            p
+        }
+    };
+
+    let log_file = log_dir.join("app.log");
+    let cfg = ConfigBuilder::new()
+        .set_time_format_rfc3339()
+        .set_target_level(LevelFilter::Error)
+        .build();
+
+    let mut loggers: Vec<Box<dyn simplelog::SharedLogger>> = vec![];
+    if let Some(term) = TermLogger::new(LevelFilter::Info, cfg.clone(), TerminalMode::Mixed, ColorChoice::Auto).into() {
+        loggers.push(term);
+    }
+    if let Ok(file) = OpenOptions::new().create(true).append(true).open(&log_file) {
+        loggers.push(WriteLogger::new(LevelFilter::Debug, cfg, file));
+    }
+    let _ = CombinedLogger::init(loggers);
+    log::info!("===== ChatGPT Desktop starting =====");
+    log::info!("[logger] file = {}", log_file.display());
+}
 
 fn main() {
+    init_logger();
+
     tauri::Builder::default()
-        // LOG plugin: ghi mọi log ra file app.log + stdout
-        .plugin(
-            tauri_plugin_log::Builder::default()
-                .targets([
-                    Target::new(TargetKind::Stdout),
-                    Target::new(TargetKind::LogDir { file_name: Some("app".into()) }),
-                    Target::new(TargetKind::Webview),
-                ])
-                .level(log::LevelFilter::Info)
-                .level_for("chatgpt::core::history", log::LevelFilter::Debug)
-                .max_file_size(10_000_000) // 10 MB rotate
-                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
-                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
-                .build(),
-        )
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -42,7 +75,6 @@ fn main() {
             window::open_settings,
         ])
         .setup(|app| {
-            log::info!("[app] starting ChatGPT Desktop");
             log::info!("[app] exe = {:?}", std::env::current_exe().ok());
             log::info!("[app] version = {}", env!("CARGO_PKG_VERSION"));
 
@@ -53,7 +85,6 @@ fn main() {
                 Err(e) => log::error!("[app] init_session failed: {}", e),
             }
 
-            // Event listeners (CSP-safe via postMessage)
             let log_handle = app.handle().clone();
             app.listen_any("chat-logger://log-message", move |event| {
                 #[derive(serde::Deserialize)]
