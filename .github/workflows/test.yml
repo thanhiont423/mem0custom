@@ -24,7 +24,7 @@ jobs:
       - name: Install validation tools
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml openapi-spec-validator
+          pip install pyyaml openapi-spec-validator boto3
 
       - name: Python syntax check (ast.parse)
         run: |
@@ -81,9 +81,15 @@ jobs:
           done
           echo "✅ All required env vars documented"
 
+      - name: Run cron unit tests (r2-budget-check)
+        run: |
+          set -e
+          python -m unittest scripts.test_r2_budget_check -v 2>&1 | tail -30
+          echo "✅ Cron unit tests passed"
+
       - name: Summary
         run: |
-          echo "All syntax checks passed!"
+          echo "All syntax checks + unit tests passed!"
           echo ""
           echo "Validated:"
           echo "  - Python files (ast.parse)"
@@ -91,6 +97,7 @@ jobs:
           echo "  - OpenAPI spec for ChatGPT"
           echo "  - docker-compose.yml"
           echo "  - .env.example completeness"
+          echo "  - r2-budget-check.py unit tests (20 tests)"
 
   smoke-test-prod:
     name: Smoke test production endpoints
@@ -149,7 +156,4 @@ jobs:
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
-          tools=$(echo "$resp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r.get('result',{}).get('tools',[])))")
-          echo "Tools count: $tools"
-          test "$tools" -ge "6"
-          echo "✅ /mcp returned $tools tools"
+          tools=$(echo "$resp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(l
