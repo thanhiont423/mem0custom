@@ -70,6 +70,8 @@ fn main() {
             cmd::set_theme,
             cmd::log_message,
             cmd::compact_session,
+            cmd::get_instruction,
+            cmd::get_keywords,
             window::open_settings,
         ])
         .setup(|app| {

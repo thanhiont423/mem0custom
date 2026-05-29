@@ -228,3 +228,47 @@ pub fn set_view_ask(app: AppHandle, enabled: bool) {
         );
     }
 }
+
+
+// ============= v0.3.0 — instruction + keywords =============
+
+#[command]
+pub fn get_instruction(state: State<HistoryState>) -> Option<String> {
+    state.session.lock().ok()
+        .and_then(|s| s.clone())
+        .and_then(|m| m.instruction)
+}
+
+#[command]
+pub fn get_keywords(app: AppHandle) -> serde_json::Value {
+    let path = match app.path().app_data_dir() {
+        Ok(p) => p.join("com.nofwl.chatgpt").join("keywords.json"),
+        Err(_) => return default_keywords(),
+    };
+    let alt = std::env::current_exe().ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .map(|d| d.join("data").join("com.nofwl.chatgpt").join("keywords.json"));
+
+    for p in [Some(path), alt].into_iter().flatten() {
+        if p.exists() {
+            if let Ok(content) = std::fs::read_to_string(&p) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                    log::info!("[keywords] loaded from {}", p.display());
+                    return v;
+                }
+            }
+        }
+    }
+    log::debug!("[keywords] no file -> using defaults");
+    default_keywords()
+}
+
+fn default_keywords() -> serde_json::Value {
+    serde_json::json!({
+        "compact": "compact_session",
+        "lưu": "compact_session",
+        "luu": "compact_session",
+        "/compact": "compact_session",
+        "/lưu": "compact_session"
+    })
+}

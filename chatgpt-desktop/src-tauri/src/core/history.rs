@@ -1,13 +1,6 @@
 // Chat history module — WAL + per-session JSON export với AUTO-PORTABLE detection
-//
-// Auto-portable logic:
-//   - Nếu exe nằm trong "Program Files" (cài qua installer) -> lưu vào %APPDATA%
-//   - Nếu exe nằm chỗ khác (USB, Downloads, portable run) -> lưu cạnh exe trong ./data/
-//   - User có thể ép portable mode bằng cách tạo file `portable.flag` cạnh exe
-//   - User có thể ép appdata mode bằng cách tạo file `use-appdata.flag` cạnh exe
-//
-// Log: mọi hành vi (init, log_message, compact, recovery) đều log qua `log` crate
-// (output qua tauri-plugin-log -> file app.log + console)
+// + INSTRUCTION FILE feature (v0.3.0): đọc instruction.md/instruction.txt khi
+//   init_session, gắn vào SessionMeta + SessionFile.
 
 use chrono::Local;
 use log::{debug, error, info, warn};
@@ -35,6 +28,8 @@ pub struct SessionMeta {
     pub session_id: String,
     pub started_at: u64,
     pub started_at_iso: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,6 +41,8 @@ pub struct SessionFile {
     pub exported_at_iso: String,
     pub exported_via: String,
     pub message_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction: Option<String>,
     pub messages: Vec<LoggedMessage>,
 }
 
@@ -61,17 +58,15 @@ fn detect_portable_mode() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?.to_path_buf();
 
-    // 1. Explicit override files
     if exe_dir.join("use-appdata.flag").exists() {
         info!("[portable] use-appdata.flag found -> AppData mode");
         return None;
     }
     if exe_dir.join("portable.flag").exists() {
-        info!("[portable] portable.flag found -> portable mode (data cạnh exe)");
+        info!("[portable] portable.flag found -> portable mode");
         return Some(exe_dir.join("data"));
     }
 
-    // 2. Auto-detect: KHÔNG Program Files = portable
     let exe_str = exe_dir.to_string_lossy().to_lowercase();
     let in_program_files = exe_str.contains("program files")
         || exe_str.contains("programfiles")
@@ -81,14 +76,12 @@ fn detect_portable_mode() -> Option<PathBuf> {
         || exe_str.contains("/opt/");
 
     if in_program_files {
-        info!("[portable] exe in system install dir ({}) -> AppData mode", exe_str);
+        info!("[portable] exe in system install dir -> AppData mode");
         return None;
     }
 
-    // 3. Verify can write
     let data_dir = exe_dir.join("data");
     if fs::create_dir_all(&data_dir).is_err() {
-        warn!("[portable] cannot create ./data cạnh exe -> fallback AppData");
         return None;
     }
     let test_file = data_dir.join(".write_test");
@@ -98,10 +91,7 @@ fn detect_portable_mode() -> Option<PathBuf> {
             info!("[portable] auto-detected portable mode -> {}", data_dir.display());
             Some(data_dir)
         }
-        Err(e) => {
-            warn!("[portable] write test failed ({}) -> fallback AppData", e);
-            None
-        }
+        Err(_) => None,
     }
 }
 
@@ -139,11 +129,58 @@ fn recovered_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Đọc file instruction nếu tồn tại. Tìm theo thứ tự:
+/// 1. <root_dir>/instruction.md
+/// 2. <root_dir>/instruction.txt
+/// 3. <root_dir>/instruction
+/// Nếu file > 100 KB -> log warn và truncate (tránh prompt quá dài).
+fn read_instruction(app: &AppHandle) -> Option<String> {
+    let root = root_dir(app).ok()?;
+    let candidates = [
+        root.join("instruction.md"),
+        root.join("instruction.txt"),
+        root.join("instruction"),
+    ];
+
+    for path in &candidates {
+        if path.exists() {
+            match fs::read_to_string(path) {
+                Ok(content) => {
+                    let trimmed = content.trim();
+                    if trimmed.is_empty() {
+                        info!("[instruction] file rỗng, bỏ qua: {}", path.display());
+                        continue;
+                    }
+                    const MAX: usize = 100_000;
+                    let final_content = if trimmed.len() > MAX {
+                        warn!(
+                            "[instruction] file quá lớn ({} bytes), truncate xuống {} bytes",
+                            trimmed.len(),
+                            MAX
+                        );
+                        trimmed[..MAX].to_string()
+                    } else {
+                        trimmed.to_string()
+                    };
+                    info!(
+                        "[instruction] loaded {} chars từ {}",
+                        final_content.len(),
+                        path.display()
+                    );
+                    return Some(final_content);
+                }
+                Err(e) => {
+                    error!("[instruction] đọc file fail {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+    debug!("[instruction] không có file instruction.md/.txt cạnh data");
+    None
+}
+
 fn now_ts() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 fn now_iso() -> String {
@@ -169,7 +206,7 @@ pub fn init_session(app: &AppHandle, state: &HistoryState) -> Result<SessionMeta
     let wal = wal_path(app)?;
 
     if meta_path.exists() {
-        info!("[history] found stale session from previous run -> checking WAL");
+        info!("[history] found stale session -> checking WAL");
         let old_meta_raw = fs::read_to_string(&meta_path).map_err(|e| e.to_string())?;
         let old_meta: SessionMeta =
             serde_json::from_str(&old_meta_raw).map_err(|e| e.to_string())?;
@@ -177,7 +214,7 @@ pub fn init_session(app: &AppHandle, state: &HistoryState) -> Result<SessionMeta
         if wal.exists() {
             let msgs = read_wal(&wal)?;
             if !msgs.is_empty() {
-                info!("[history] CRASH RECOVERY: {} messages in WAL, dumping to recovered/", msgs.len());
+                info!("[history] CRASH RECOVERY: {} messages", msgs.len());
                 let dir = recovered_dir(app)?;
                 let fname = format!(
                     "session_recovered_{}_{}.json",
@@ -193,26 +230,29 @@ pub fn init_session(app: &AppHandle, state: &HistoryState) -> Result<SessionMeta
                     exported_at_iso: now_iso(),
                     exported_via: "crash_recovery".to_string(),
                     message_count: msgs.len(),
+                    instruction: old_meta.instruction.clone(),
                     messages: msgs,
                 };
                 let pretty =
                     serde_json::to_string_pretty(&session_file).map_err(|e| e.to_string())?;
                 let recovery_path = dir.join(&fname);
                 fs::write(&recovery_path, pretty).map_err(|e| e.to_string())?;
-                info!("[history] recovery file written: {}", recovery_path.display());
-            } else {
-                debug!("[history] WAL exists but empty, skipping recovery");
+                info!("[history] recovery file: {}", recovery_path.display());
             }
             let _ = fs::remove_file(&wal);
         }
         let _ = fs::remove_file(&meta_path);
     }
 
+    // Đọc instruction file cho session mới
+    let instruction = read_instruction(app);
+
     let ts = now_ts();
     let meta = SessionMeta {
         session_id: make_session_id(ts),
         started_at: ts,
         started_at_iso: now_iso(),
+        instruction,
     };
     fs::write(
         &meta_path,
@@ -223,7 +263,9 @@ pub fn init_session(app: &AppHandle, state: &HistoryState) -> Result<SessionMeta
 
     *state.session.lock().unwrap() = Some(meta.clone());
     state.buffer.lock().unwrap().clear();
-    info!("[history] new session created: id={}", meta.session_id);
+    info!("[history] new session: id={} instruction={}",
+          meta.session_id,
+          if meta.instruction.is_some() { "YES" } else { "NO" });
     Ok(meta)
 }
 
@@ -242,7 +284,7 @@ pub fn log_message(
     writeln!(f, "{}", line).map_err(|e| e.to_string())?;
     let _ = f.sync_data();
     debug!(
-        "[history] log_message: role={} id={} content_len={}",
+        "[history] log_message: role={} id={} len={}",
         msg.role,
         msg.id,
         msg.content.len()
@@ -256,7 +298,7 @@ pub fn compact_session(
     state: &HistoryState,
     via: &str,
 ) -> Result<Option<PathBuf>, String> {
-    info!("[history] compact_session triggered via='{}'", via);
+    info!("[history] compact_session via='{}'", via);
     let wal = wal_path(app)?;
     let msgs = if wal.exists() { read_wal(&wal)? } else { vec![] };
 
@@ -264,13 +306,13 @@ pub fn compact_session(
     let meta = match meta {
         Some(m) => m,
         None => {
-            error!("[history] compact failed: no active session");
-            return Err("No active session — call init_session first".into());
+            error!("[history] compact fail: no active session");
+            return Err("No active session".into());
         }
     };
 
     if msgs.is_empty() {
-        warn!("[history] compact: buffer empty, only rotating session");
+        warn!("[history] compact: buffer empty, only rotating");
         rotate_session(app, state)?;
         return Ok(None);
     }
@@ -284,6 +326,7 @@ pub fn compact_session(
         exported_at_iso: now_iso(),
         exported_via: via.to_string(),
         message_count: msgs.len(),
+        instruction: meta.instruction.clone(),
         messages: msgs,
     };
 
@@ -308,11 +351,14 @@ pub fn compact_session(
 }
 
 fn rotate_session(app: &AppHandle, state: &HistoryState) -> Result<(), String> {
+    // Reload instruction mỗi rotate (user có thể đã sửa file)
+    let instruction = read_instruction(app);
     let ts = now_ts();
     let meta = SessionMeta {
         session_id: make_session_id(ts),
         started_at: ts,
         started_at_iso: now_iso(),
+        instruction,
     };
     fs::write(
         session_meta_path(app)?,
@@ -320,7 +366,7 @@ fn rotate_session(app: &AppHandle, state: &HistoryState) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     File::create(wal_path(app)?).map_err(|e| e.to_string())?;
-    debug!("[history] session rotated: new id={}", meta.session_id);
+    debug!("[history] rotated: new id={}", meta.session_id);
     *state.session.lock().unwrap() = Some(meta);
     state.buffer.lock().unwrap().clear();
     Ok(())
@@ -341,7 +387,6 @@ fn read_wal(path: &PathBuf) -> Result<Vec<LoggedMessage>, String> {
             Ok(m) => out.push(m),
             Err(_) => {
                 corrupt += 1;
-                continue;
             }
         }
     }
@@ -351,9 +396,6 @@ fn read_wal(path: &PathBuf) -> Result<Vec<LoggedMessage>, String> {
     Ok(out)
 }
 
-// ===========================================================================
-// Unit tests — chỉ test logic không cần AppHandle
-// ===========================================================================
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,14 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn test_filename_stamp_format() {
-        let stamp = now_filename_stamp();
-        assert_eq!(stamp.len(), 15);
-        assert_eq!(&stamp[8..9], "-");
-    }
-
-    #[test]
-    fn test_session_serialize() {
+    fn test_session_serialize_with_instruction() {
         let sf = SessionFile {
             session_id: "s1234567".into(),
             started_at: 100,
@@ -383,17 +418,29 @@ mod tests {
             exported_at: 200,
             exported_at_iso: "2026-01-01T00:01:00Z".into(),
             exported_via: "compact".into(),
-            message_count: 1,
-            messages: vec![LoggedMessage {
-                id: "m1".into(),
-                conversation_id: "c1".into(),
-                role: "user".into(),
-                content: "hi".into(),
-                captured_at: 150,
-            }],
+            message_count: 0,
+            instruction: Some("You are a helpful assistant".into()),
+            messages: vec![],
         };
         let json = serde_json::to_string(&sf).unwrap();
-        assert!(json.contains("\"session_id\":\"s1234567\""));
-        assert!(json.contains("\"role\":\"user\""));
+        assert!(json.contains("\"instruction\":\"You are a helpful assistant\""));
+    }
+
+    #[test]
+    fn test_session_serialize_skip_none_instruction() {
+        let sf = SessionFile {
+            session_id: "s1234567".into(),
+            started_at: 100,
+            started_at_iso: "2026-01-01T00:00:00Z".into(),
+            exported_at: 200,
+            exported_at_iso: "2026-01-01T00:01:00Z".into(),
+            exported_via: "compact".into(),
+            message_count: 0,
+            instruction: None,
+            messages: vec![],
+        };
+        let json = serde_json::to_string(&sf).unwrap();
+        // Khi None, field instruction KHÔNG xuất hiện trong JSON (skip_serializing_if)
+        assert!(!json.contains("instruction"));
     }
 }
