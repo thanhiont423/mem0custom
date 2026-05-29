@@ -283,13 +283,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-nt(f"OK: {result['sessions']} sessions, {result['summaries']} summaries uploaded.")
-        return 0
-    except Exception as exc:
-        logger.error("[ARCHIVE-UPLOAD] FATAL: %s", exc, exc_info=True)
-        print(f"FAIL: {exc}", file=sys.stderr)
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
