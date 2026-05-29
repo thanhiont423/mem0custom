@@ -119,9 +119,14 @@ jobs:
         run: cargo test --bin chatgpt core::history -- --nocapture
         working-directory: chatgpt-desktop/src-tauri
 
-      - name: Build Tauri release (verbose)
+      - name: Tauri info (debug environment)
         shell: pwsh
-        run: pnpm tauri build --verbose
+        run: pnpm tauri info
+        continue-on-error: true
+
+      - name: Build Tauri release (explicit bundles)
+        shell: pwsh
+        run: pnpm tauri build --verbose --bundles nsis,msi
 
       - name: Diagnostic — dump release/ + bundle/
         if: always()
