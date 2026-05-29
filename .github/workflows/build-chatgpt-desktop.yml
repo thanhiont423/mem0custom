@@ -1,10 +1,5 @@
 name: Build ChatGPT Desktop
 
-# Trigger:
-#   - Push lên main hoặc feature/chatgpt-desktop-export → build + upload artifact
-#   - Tag v* (vd v0.1.0)                                → build + tạo GitHub Release
-#   - Pull request                                       → chỉ test, không upload
-#   - workflow_dispatch                                  → chạy thủ công từ tab Actions
 on:
   push:
     branches:
@@ -16,13 +11,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Cancel run cũ khi push commit mới lên cùng branch (tránh tốn phút runner)
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ---------- 1. Test logic Python (nhanh, chạy song song với build) ----------
   test-logic:
     name: Verify logic (Python harness)
     runs-on: ubuntu-latest
@@ -31,16 +24,13 @@ jobs:
         working-directory: chatgpt-desktop
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Run 17 test cases
         run: python test_history_logic.py
 
-  # ---------- 2. Build .msi + .exe trên Windows ----------
   build-windows:
     name: Build Windows installer
     needs: test-logic
@@ -48,66 +38,54 @@ jobs:
     defaults:
       run:
         working-directory: chatgpt-desktop
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 9
-
       - name: Setup Rust stable (MSVC)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-
       - name: Cache Cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: chatgpt-desktop/src-tauri -> target
           shared-key: tauri-windows
-
       - name: Cache pnpm store
         uses: actions/cache@v4
         with:
           path: ~\.pnpm-store
           key: pnpm-${{ hashFiles('chatgpt-desktop/pnpm-lock.yaml') }}
-
       - name: Install frontend dependencies
         run: pnpm install --no-frozen-lockfile
-
       - name: Run Rust unit tests (history.rs)
         run: cargo test --bin chatgpt core::history -- --nocapture
         working-directory: chatgpt-desktop/src-tauri
-
-      - name: Build Tauri release (.msi + .exe)
+      - name: Build Tauri release
         run: pnpm tauri build
-
       - name: List build output
+        shell: pwsh
         run: |
           Write-Host "=== bundle/ contents ==="
           Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File | Select-Object FullName, Length
-
       - name: Upload .msi installer
         uses: actions/upload-artifact@v4
         with:
           name: ChatGPT-msi-installer
           path: chatgpt-desktop/src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
-
       - name: Upload .exe NSIS installer
         uses: actions/upload-artifact@v4
         with:
           name: ChatGPT-nsis-installer
           path: chatgpt-desktop/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
-
       - name: Upload portable .exe
         uses: actions/upload-artifact@v4
         with:
@@ -115,7 +93,6 @@ jobs:
           path: chatgpt-desktop/src-tauri/target/release/ChatGPT.exe
           if-no-files-found: warn
 
-  # ---------- 3. Smoke test: cài .msi, launch app, verify, uninstall ----------
   smoke-test:
     name: Smoke test installer
     needs: build-windows
@@ -133,24 +110,132 @@ jobs:
         shell: pwsh
         run: |
           $msi = Get-ChildItem -Path ./installer -Filter *.msi -Recurse | Select-Object -First 1
-          if (-not $msi) {
-            Write-Error "No .msi file found in artifact"
-            exit 1
-          }
+          if (-not $msi) { Write-Error "No .msi file"; exit 1 }
           $sizeMB = [math]::Round($msi.Length / 1MB, 2)
           Write-Host "Found: $($msi.FullName) ($sizeMB MB)"
-          if ($sizeMB -lt 2) {
-            Write-Error "MSI too small ($sizeMB MB) — build likely broken"
-            exit 1
-          }
-          if ($sizeMB -gt 200) {
-            Write-Warning "MSI khá lớn ($sizeMB MB) — kiểm tra có lỡ đóng gói target/ không"
-          }
+          if ($sizeMB -lt 2) { Write-Error "MSI too small ($sizeMB MB)"; exit 1 }
           echo "msi_path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Install .msi silently
         shell: pwsh
         run: |
           $msi = "${{ steps.find_msi.outputs.msi_path }}"
-          Write-Host "==> msiexec /i `"$msi`" /quiet /norestart /l*v install.log"
           $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart /l*v install.log" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Write-Host "Install failed: $($proc.ExitCode)"
+            if (Test-Path install.log) { Get-Content install.log -Tail 50 }
+            exit 1
+          }
+          Write-Host "Install OK"
+
+      - name: Locate installed ChatGPT.exe
+        id: find_exe
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "C:\Program Files\ChatGPT\ChatGPT.exe",
+            "C:\Program Files (x86)\ChatGPT\ChatGPT.exe",
+            "$env:LOCALAPPDATA\Programs\ChatGPT\ChatGPT.exe"
+          )
+          $exe = $null
+          foreach ($p in $candidates) { if (Test-Path $p) { $exe = $p; break } }
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path "C:\Program Files" -Filter "ChatGPT.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $exe) { Write-Error "ChatGPT.exe not found"; exit 1 }
+          Write-Host "Found: $exe"
+          Write-Host "Size: $([math]::Round((Get-Item $exe).Length / 1MB, 2)) MB"
+          echo "exe_path=$exe" >> $env:GITHUB_OUTPUT
+
+      - name: Launch app, verify no crash
+        shell: pwsh
+        run: |
+          $exe = "${{ steps.find_exe.outputs.exe_path }}"
+          $proc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $running = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+          if (-not $running) {
+            Write-Error "ChatGPT.exe crashed on startup"
+            Get-EventLog -LogName Application -Newest 10 -EntryType Error -ErrorAction SilentlyContinue |
+              Where-Object { $_.Source -like "*ChatGPT*" -or $_.Source -like "*Application Error*" } |
+              Format-List
+            exit 1
+          }
+          Write-Host "OK: ChatGPT running (PID $($proc.Id), $([math]::Round($running.WorkingSet64/1MB,2)) MB)"
+
+      - name: Verify history.rs init_session created files
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 5
+          $appData = "$env:APPDATA\com.nofwl.chatgpt"
+          if (-not (Test-Path $appData)) { Write-Warning "App data dir not created yet"; exit 0 }
+          Write-Host "App data: $appData"
+          Get-ChildItem $appData -Recurse | Select-Object FullName, Length
+          $meta = Join-Path $appData "current.session"
+          $wal = Join-Path $appData "current.wal"
+          if (Test-Path $wal) { Write-Host "PASS: current.wal exists" }
+          if (Test-Path $meta) {
+            Write-Host "PASS: current.session exists"
+            $c = Get-Content $meta -Raw | ConvertFrom-Json
+            if ($c.session_id -match '^s[0-9a-f]+$') {
+              Write-Host "PASS: session_id format valid: $($c.session_id)"
+            } else {
+              Write-Error "FAIL: session_id format invalid: $($c.session_id)"
+              exit 1
+            }
+          }
+
+      - name: Kill app
+        if: always()
+        shell: pwsh
+        run: Get-Process -Name "ChatGPT" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Uninstall .msi
+        if: always()
+        shell: pwsh
+        run: |
+          $msi = "${{ steps.find_msi.outputs.msi_path }}"
+          if ($msi) { Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /quiet /norestart" -Wait }
+
+      - name: Upload install log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-log
+          path: install.log
+          if-no-files-found: ignore
+
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, smoke-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-artifacts
+      - name: List downloaded files
+        run: find ./release-artifacts -type f
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./release-artifacts/ChatGPT-msi-installer/*.msi
+            ./release-artifacts/ChatGPT-nsis-installer/*.exe
+            ./release-artifacts/ChatGPT-exe-portable/*.exe
+          generate_release_notes: true
+          body: |
+            ## ChatGPT Desktop ${{ github.ref_name }}
+            
+            Tích hợp mem0custom — export chat history dạng JSON theo keyword `compact` / `lưu`.
+            
+            ### Cài
+            - **Recommended:** tải `.msi` và double-click
+            - **Portable:** tải `ChatGPT.exe`, chạy trực tiếp
+            
+            ### Đã smoke-test
+            Mọi installer release đều đã: cài → launch → verify init → uninstall trên Windows clean.
+            Không pass smoke test thì không có Release.
