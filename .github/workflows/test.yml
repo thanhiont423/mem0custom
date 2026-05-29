@@ -24,7 +24,7 @@ jobs:
       - name: Install validation tools
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml openapi-spec-validator boto3 mcp httpx
+          pip install pyyaml openapi-spec-validator boto3 mcp httpx fastapi "uvicorn[standard]"
 
       - name: Python syntax check (ast.parse)
         run: |
@@ -93,6 +93,13 @@ jobs:
           python -m unittest scripts.test_archive_mcp -v 2>&1 | tail -25
           echo "✅ MCP tools tests passed"
 
+      - name: Run OAuth unit tests (mcp-http-server)
+        run: |
+          set -e
+          cd mcp-http-server
+          python -m unittest test_oauth -v 2>&1 | tail -30
+          echo "✅ OAuth tests passed"
+
       - name: Summary
         run: |
           echo "All syntax checks + unit tests passed!"
@@ -105,6 +112,7 @@ jobs:
           echo "  - .env.example completeness"
           echo "  - r2-budget-check.py unit tests (20 tests)"
           echo "  - archive-mcp.py unit tests (16 tests)"
+          echo "  - mcp-http-server oauth.py unit tests (22 tests)"
 
   smoke-test-prod:
     name: Smoke test production endpoints
@@ -151,12 +159,4 @@ jobs:
           echo "$paths" | grep -q "/memories"
           echo "✅ /memory openapi OK"
 
-      - name: Test /mcp tools/list (requires MCP_BEARER_TOKEN secret)
-        env:
-          TOKEN: ${{ secrets.MCP_BEARER_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "⊘ Skipped (MCP_BEARER_TOKEN not set)"
-            exit 0
-          fi
-          resp=$(curl -s -X POST "https://claude.hangocthanh.io.vn
+      - name: Test /mcp tool
