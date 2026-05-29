@@ -115,43 +115,42 @@ jobs:
           path: chatgpt-desktop/src-tauri/target/release/ChatGPT.exe
           if-no-files-found: warn
 
-  # ---------- 3. Tự tạo GitHub Release khi push tag v* ----------
-  release:
-    name: Create GitHub Release
+  # ---------- 3. Smoke test: cài .msi, launch app, verify, uninstall ----------
+  smoke-test:
+    name: Smoke test installer
     needs: build-windows
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    runs-on: windows-latest
+    timeout-minutes: 10
     steps:
-      - name: Download all artifacts
+      - name: Download .msi artifact
         uses: actions/download-artifact@v4
         with:
-          path: ./release-artifacts
+          name: ChatGPT-msi-installer
+          path: ./installer
 
-      - name: List downloaded files
-        run: find ./release-artifacts -type f
+      - name: Locate .msi
+        id: find_msi
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem -Path ./installer -Filter *.msi -Recurse | Select-Object -First 1
+          if (-not $msi) {
+            Write-Error "No .msi file found in artifact"
+            exit 1
+          }
+          $sizeMB = [math]::Round($msi.Length / 1MB, 2)
+          Write-Host "Found: $($msi.FullName) ($sizeMB MB)"
+          if ($sizeMB -lt 2) {
+            Write-Error "MSI too small ($sizeMB MB) — build likely broken"
+            exit 1
+          }
+          if ($sizeMB -gt 200) {
+            Write-Warning "MSI khá lớn ($sizeMB MB) — kiểm tra có lỡ đóng gói target/ không"
+          }
+          echo "msi_path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ./release-artifacts/ChatGPT-msi-installer/*.msi
-            ./release-artifacts/ChatGPT-nsis-installer/*.exe
-            ./release-artifacts/ChatGPT-exe-portable/*.exe
-          generate_release_notes: true
-          body: |
-            ## ChatGPT Desktop ${{ github.ref_name }}
-
-            Tích hợp với mem0custom server — export chat history dưới dạng JSON theo keyword `compact` / `lưu`.
-
-            ### Cài đặt
-            - **Recommended:** tải `*.msi` và double-click cài
-            - **Portable:** tải `ChatGPT.exe`, chạy trực tiếp (không cài hệ thống)
-
-            ### Tính năng mới
-            - Lưu chat session ra JSON khi gõ `compact` hoặc `lưu`
-            - WAL recovery khi app crash
-            - Auto-compact khi đóng app
-
-            Chi tiết: xem [CHAT-HISTORY-README.md](chatgpt-desktop/CHAT-HISTORY-README.md)
+      - name: Install .msi silently
+        shell: pwsh
+        run: |
+          $msi = "${{ steps.find_msi.outputs.msi_path }}"
+          Write-Host "==> msiexec /i `"$msi`" /quiet /norestart /l*v install.log"
+          $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart /l*v install.log" -Wait -PassThru
