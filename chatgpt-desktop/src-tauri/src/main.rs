@@ -2,18 +2,18 @@
 
 mod core;
 use core::{cmd, history::{HistoryState, LoggedMessage}, setup, window};
-use simplelog::{ColorChoice, CombinedLogger, Config, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, WriteLogger};
 use std::fs::OpenOptions;
 use tauri::{Listener, Manager};
 
 fn init_logger() {
-    // Log file ở cạnh root_dir (auto-portable hoặc AppData)
-    // Lấy đường dẫn trước khi Tauri start vì cần log ngay
     let log_dir = {
         let exe = std::env::current_exe().ok();
         let exe_dir = exe.as_ref().and_then(|p| p.parent()).map(|p| p.to_path_buf());
 
-        let portable_data = exe_dir.as_ref().map(|d| d.join("data").join("com.nofwl.chatgpt").join("logs"));
+        let portable_data = exe_dir
+            .as_ref()
+            .map(|d| d.join("data").join("com.nofwl.chatgpt").join("logs"));
         let portable_works = portable_data
             .as_ref()
             .map(|d| std::fs::create_dir_all(d).is_ok())
@@ -22,7 +22,6 @@ fn init_logger() {
         if portable_works {
             portable_data.unwrap()
         } else {
-            // Fallback APPDATA
             let base = std::env::var("APPDATA")
                 .ok()
                 .map(std::path::PathBuf::from)
@@ -39,10 +38,9 @@ fn init_logger() {
         .set_target_level(LevelFilter::Error)
         .build();
 
-    let mut loggers: Vec<Box<dyn simplelog::SharedLogger>> = vec![];
-    if let Some(term) = TermLogger::new(LevelFilter::Info, cfg.clone(), TerminalMode::Mixed, ColorChoice::Auto).into() {
-        loggers.push(term);
-    }
+    let mut loggers: Vec<Box<dyn simplelog::SharedLogger>> = vec![
+        TermLogger::new(LevelFilter::Info, cfg.clone(), TerminalMode::Mixed, ColorChoice::Auto),
+    ];
     if let Ok(file) = OpenOptions::new().create(true).append(true).open(&log_file) {
         loggers.push(WriteLogger::new(LevelFilter::Debug, cfg, file));
     }
