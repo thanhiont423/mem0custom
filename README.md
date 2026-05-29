@@ -2,6 +2,16 @@
 
 <a href="https://glama.ai/mcp/servers/elvismdev/mem0-mcp-selfhosted"><img width="380" height="200" src="https://glama.ai/mcp/servers/elvismdev/mem0-mcp-selfhosted/badge?v=1" alt="mem0-mcp-selfhosted MCP server" /></a>
 
+
+> **Fork v0.4.2 (portable HTTP exe + archive):** This fork adds Windows portable .exe distribution, 7 archive MCP tools, auto-upload Claude Code transcripts, and Claude Code hooks for `/compact` trigger. See [Windows portable install guide](docs/INSTALL-WINDOWS-PORTABLE.md) and [CHANGELOG](CHANGELOG.md#v042---2026-05-29).
+>
+> **Quick start (Windows portable):**
+> 1. Download `mem0-mcp.exe` from [GitHub Actions artifacts](https://github.com/thanhiont423/mem0custom/actions)
+> 2. Create `.env` next to exe ([template](docs/INSTALL-WINDOWS-PORTABLE.md#1-create-config))
+> 3. `claude mcp add --scope user --transport http mem0 http://127.0.0.1:8765/mcp`
+> 4. `/mcp` in Claude Code shows 11 mem0 + 7 archive = 18 tools
+
+
 Self-hosted [mem0](https://github.com/mem0ai/mem0) MCP server for Claude Code. Run a complete memory server against self-hosted Qdrant + Neo4j + Ollama, with your choice of Anthropic (Claude) or Ollama as the main LLM.
 
 Uses the `mem0ai` package directly as a library, supports both Claude's OAT token and fully local Ollama setups, and exposes 11 MCP tools for full memory management.

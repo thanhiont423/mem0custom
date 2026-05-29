@@ -1,3 +1,69 @@
+# Changelog
+
+## v0.4.2 - 2026-05-29
+
+### Added — Portable HTTP Windows EXE
+- New entrypoint `mem0-mcp-http` (`http_server.py`) — PyInstaller-aware wrapper that:
+  - Resolves runtime dir from `sys.executable` parent when frozen, falls back to cwd in dev mode
+  - Loads `.env` from runtime dir (or skips if absent)
+  - Sets safe defaults: `MEM0_TRANSPORT=streamable-http`, `MEM0_HOST=127.0.0.1`, `MEM0_PORT=8765`
+  - Prints startup banner with config status, OAT file, log file location
+- Multi-mode argv dispatch in `http_server.py`:
+  - no args → run HTTP server (default)
+  - `--upload-archive` → run archive upload routine and exit
+  - `--install-hooks` → install Claude Code SessionStart/Stop hooks
+- PyInstaller spec file (`mem0-mcp.spec`) with `collect_all` for mem0, mcp, qdrant_client, openai, anthropic, tiktoken
+- GitHub Actions workflow `build-windows.yml` — Windows runner, Python 3.11, uploads `dist/mem0-mcp.exe` as artifact
+- Bundled Windows install scripts (in companion `mem0-mcp-portable-build` distribution):
+  - `setup.ps1` — 10-step one-step installer
+  - `install-on-target.ps1` — install on machines without Python
+  - `install-autostart.bat` — registers Task Scheduler with auto-restart
+  - `install-claude-hook.ps1` — registers SessionStart/`compact` hook (PowerShell 5.1 compatible)
+  - `verify-install.ps1` — 8-component health check + auto-fix
+  - `uninstall.ps1` — clean removal
+
+### Added — Archive tools (7 MCP tools)
+- `archive_tools.py` — new module, conditionally registers archive tools when `ARCHIVE_URL` env var is set
+- 7 tools backed by Archive API on VPS:
+  - `list_old_sessions` — GET /sessions
+  - `get_session_summary` — GET /sessions/{id} with compact view (first/last 5 messages)
+  - `get_old_session` — GET /sessions/{id} full transcript
+  - `search_old_sessions` — GET /sessions?q=...
+  - `list_compact_summaries` — GET /compact-summaries
+  - `search_compact_summaries` — GET /compact-summaries?q=... (preferred for "what did I discuss about X" queries)
+  - `get_compact_summary` — GET /compact-summaries/{id}
+- Server.py registers archive tools after mem0 tools via lazy import (no hard dependency)
+
+### Added — Archive auto-upload
+- `archive_upload.py` — scan `~/.claude/projects/*.jsonl`, upload sessions + compact summaries to VPS
+- Hash-based dedup via `~/.cache/claude-archive-state.json` (2 keys: `uploaded` + `summaries_uploaded`)
+- Compact summary detection via regex: `previously discussed|conversation summary|prior conversation|earlier in this conversation` + length > 100 chars
+- Triggered 3 ways:
+  - CLI: `mem0-mcp.exe --upload-archive` (via Task Scheduler hourly)
+  - Claude Code hook on SessionStart matcher `compact`
+  - Manual: `from mem0_mcp_selfhosted.archive_upload import upload_archive`
+
+### Fixed — Schema match with VPS CompactSummary Pydantic model
+- `workspace_path` now sent (was missing)
+- `position_in_session` moved to top-level (was incorrectly nested in `metadata.source_position`)
+- `compacted_at` field removed (not in VPS schema, was being silently dropped)
+
+### Added — Tests (42 unit tests)
+- `tests/unit/test_archive_pipeline.py` — 25 tests covering parse_session, extract_compact_summaries, hash dedup, regex patterns
+- `tests/unit/test_archive_tools_register.py` — 10 tests for env-gate, headers, user_id, URL normalization
+- `tests/unit/test_http_server_wrapper.py` — 7 tests for runtime dir, env loading, defaults
+- Regression guards for schema bug fix (position_in_session top-level, no compacted_at, no source_position)
+
+### Added — CI
+- GitHub Actions workflow `test.yml`:
+  - Matrix: Ubuntu + Windows × Python 3.10/3.11/3.12 = 6 jobs
+  - Lint job: `compileall` all modules
+  - Schema check job: grep source code for VPS field match
+
+### Changed
+- `pyproject.toml` version 0.3.9 → 0.4.2
+- Description updated: "Self-hosted mem0 MCP server for Claude Code (HTTP exe + archive 7 tools + auto-upload + hooks)"
+
 # CHANGELOG
 
 
