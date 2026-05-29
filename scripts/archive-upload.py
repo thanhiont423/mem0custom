@@ -119,4 +119,31 @@ def main():
         print("No Claude Code sessions found", file=sys.stderr)
         return
     new = 0
-    for jsonl in sessions_dir.
+    for jsonl in sessions_dir.rglob("*.jsonl"):
+        fid = file_id(jsonl)
+        if fid in uploaded:
+            continue
+        data = parse_session(jsonl)
+        if not data:
+            continue
+        try:
+            result = upload(data)
+            uploaded.add(fid)
+            new += 1
+            print(f"Uploaded {jsonl.name} -> project={data['project_tag']} id={result['id']}")
+
+            if SUMMARIZE:
+                try:
+                    s = trigger_summary(result["id"])
+                    print(f"  + LLM summary: {s['summary'][:80]}...")
+                except Exception as e:
+                    print(f"  ! summarize failed: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"Failed {jsonl.name}: {e}", file=sys.stderr)
+    state["uploaded"] = list(uploaded)
+    save_state(state)
+    print(f"Done. {new} new sessions uploaded.")
+
+
+if __name__ == "__main__":
+    main()
