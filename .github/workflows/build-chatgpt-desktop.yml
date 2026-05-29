@@ -40,53 +40,126 @@ jobs:
         working-directory: chatgpt-desktop
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 9
+
       - name: Setup Rust stable (MSVC)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
       - name: Cache Cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: chatgpt-desktop/src-tauri -> target
           shared-key: tauri-windows
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ~\.pnpm-store
-          key: pnpm-${{ hashFiles('chatgpt-desktop/pnpm-lock.yaml') }}
-      - name: Install frontend dependencies
-        run: pnpm install --no-frozen-lockfile
+
+      - name: Install frontend dependencies (approve esbuild build script)
+        shell: pwsh
+        run: |
+          pnpm install --no-frozen-lockfile
+          # esbuild needs post-install script to download binary
+          # pnpm 9 blocks it by default → approve esbuild specifically
+          if (Test-Path package.json) {
+            (Get-Content package.json -Raw) | ConvertFrom-Json | ForEach-Object {
+              $pkg = $_
+              if (-not $pkg.PSObject.Properties['pnpm']) {
+                $pkg | Add-Member -NotePropertyName 'pnpm' -NotePropertyValue ([PSCustomObject]@{})
+              }
+              if (-not $pkg.pnpm.PSObject.Properties['onlyBuiltDependencies']) {
+                $pkg.pnpm | Add-Member -NotePropertyName 'onlyBuiltDependencies' -NotePropertyValue @('esbuild')
+              }
+              $pkg | ConvertTo-Json -Depth 100 | Set-Content package.json
+            }
+            pnpm install --no-frozen-lockfile
+          }
+
+      - name: Verify tauri CLI available
+        shell: pwsh
+        run: |
+          pnpm tauri --version
+          Write-Host "Working dir: $(Get-Location)"
+          Write-Host "Frontend src exists: $(Test-Path src)"
+          Write-Host "Tauri config exists: $(Test-Path src-tauri/tauri.conf.json)"
+
+      - name: Build frontend explicitly (vite)
+        shell: pwsh
+        run: |
+          pnpm build
+          if (-not (Test-Path dist)) {
+            Write-Error "FAIL: dist/ không được tạo sau pnpm build — vite build hỏng"
+            exit 1
+          }
+          Write-Host "PASS: dist/ created"
+          Get-ChildItem dist -Recurse | Select-Object Name, Length
+
       - name: Run Rust unit tests (history.rs)
         run: cargo test --bin chatgpt core::history -- --nocapture
         working-directory: chatgpt-desktop/src-tauri
-      - name: Build Tauri release
-        run: pnpm tauri build
-      - name: List build output
+
+      - name: Build Tauri release (verbose to catch silent fails)
         shell: pwsh
         run: |
-          Write-Host "=== bundle/ contents ==="
-          Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File | Select-Object FullName, Length
+          pnpm tauri build --verbose 2>&1
+          $exit = $LASTEXITCODE
+          Write-Host "tauri build exit code: $exit"
+          if ($exit -ne 0) {
+            Write-Error "tauri build failed with exit $exit"
+            exit $exit
+          }
+
+      - name: Diagnostic — dump target/release structure
+        if: always()
+        shell: pwsh
+        run: |
+          $targetRoot = "src-tauri/target"
+          if (-not (Test-Path $targetRoot)) {
+            Write-Warning "target/ KHÔNG tồn tại — cargo chưa từng chạy ở src-tauri/"
+          } else {
+            Write-Host "=== src-tauri/target/ (top 2 levels) ==="
+            Get-ChildItem -Path $targetRoot -Depth 1 -Force | Select-Object Mode, LastWriteTime, Length, Name
+          }
+          $release = "src-tauri/target/release"
+          if (Test-Path $release) {
+            Write-Host "=== release/ files ==="
+            Get-ChildItem -Path $release -File | Select-Object Name, Length
+            $bundle = "$release/bundle"
+            if (Test-Path $bundle) {
+              Write-Host "=== bundle/ contents ==="
+              Get-ChildItem -Path $bundle -Recurse -File | Select-Object FullName, Length
+            } else {
+              Write-Warning "bundle/ KHÔNG tồn tại — tauri compile được .exe nhưng KHÔNG bundle"
+            }
+          } else {
+            Write-Warning "release/ KHÔNG tồn tại — tauri không chạy cargo --release"
+          }
+
       - name: Upload .msi installer
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ChatGPT-msi-installer
           path: chatgpt-desktop/src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
+
       - name: Upload .exe NSIS installer
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ChatGPT-nsis-installer
           path: chatgpt-desktop/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
+
       - name: Upload portable .exe
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ChatGPT-exe-portable
@@ -144,7 +217,6 @@ jobs:
           }
           if (-not $exe) { Write-Error "ChatGPT.exe not found"; exit 1 }
           Write-Host "Found: $exe"
-          Write-Host "Size: $([math]::Round((Get-Item $exe).Length / 1MB, 2)) MB"
           echo "exe_path=$exe" >> $env:GITHUB_OUTPUT
 
       - name: Launch app, verify no crash
@@ -156,12 +228,9 @@ jobs:
           $running = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
           if (-not $running) {
             Write-Error "ChatGPT.exe crashed on startup"
-            Get-EventLog -LogName Application -Newest 10 -EntryType Error -ErrorAction SilentlyContinue |
-              Where-Object { $_.Source -like "*ChatGPT*" -or $_.Source -like "*Application Error*" } |
-              Format-List
             exit 1
           }
-          Write-Host "OK: ChatGPT running (PID $($proc.Id), $([math]::Round($running.WorkingSet64/1MB,2)) MB)"
+          Write-Host "OK: ChatGPT running (PID $($proc.Id))"
 
       - name: Verify history.rs init_session created files
         shell: pwsh
@@ -169,18 +238,14 @@ jobs:
           Start-Sleep -Seconds 5
           $appData = "$env:APPDATA\com.nofwl.chatgpt"
           if (-not (Test-Path $appData)) { Write-Warning "App data dir not created yet"; exit 0 }
-          Write-Host "App data: $appData"
           Get-ChildItem $appData -Recurse | Select-Object FullName, Length
           $meta = Join-Path $appData "current.session"
-          $wal = Join-Path $appData "current.wal"
-          if (Test-Path $wal) { Write-Host "PASS: current.wal exists" }
           if (Test-Path $meta) {
-            Write-Host "PASS: current.session exists"
             $c = Get-Content $meta -Raw | ConvertFrom-Json
             if ($c.session_id -match '^s[0-9a-f]+$') {
-              Write-Host "PASS: session_id format valid: $($c.session_id)"
+              Write-Host "PASS: session_id format OK: $($c.session_id)"
             } else {
-              Write-Error "FAIL: session_id format invalid: $($c.session_id)"
+              Write-Error "FAIL: session_id format: $($c.session_id)"
               exit 1
             }
           }
@@ -213,29 +278,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: ./release-artifacts
-      - name: List downloaded files
-        run: find ./release-artifacts -type f
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - run: find ./release-artifacts -type f
+      - uses: softprops/action-gh-release@v2
         with:
           files: |
             ./release-artifacts/ChatGPT-msi-installer/*.msi
             ./release-artifacts/ChatGPT-nsis-installer/*.exe
             ./release-artifacts/ChatGPT-exe-portable/*.exe
           generate_release_notes: true
-          body: |
-            ## ChatGPT Desktop ${{ github.ref_name }}
-            
-            Tích hợp mem0custom — export chat history dạng JSON theo keyword `compact` / `lưu`.
-            
-            ### Cài
-            - **Recommended:** tải `.msi` và double-click
-            - **Portable:** tải `ChatGPT.exe`, chạy trực tiếp
-            
-            ### Đã smoke-test
-            Mọi installer release đều đã: cài → launch → verify init → uninstall trên Windows clean.
-            Không pass smoke test thì không có Release.
