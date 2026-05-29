@@ -1,16 +1,16 @@
 /**
  * @name chat-logger.js
- * @version 0.1.0
- * @url https://github.com/lencx/ChatGPT/tree/main/scripts/chat-logger.js
+ * @version 0.2.0
+ * @url https://github.com/thanhiont423/mem0custom
  *
- * Quan sát DOM của chatgpt.com và đẩy mỗi message (user + assistant)
- * về Rust qua Tauri command `log_message`. Chỉ ghi assistant khi đã
- * stop streaming (phát hiện qua nút Copy xuất hiện trong turn đó).
+ * v0.2.0: BYPASS CSP — dùng __TAURI__.event.emit() (postMessage) thay vì invoke()
+ * vì chatgpt.com CSP block 'ipc.localhost' (Tauri HTTP IPC endpoint).
  */
 
 class ChatLogger {
   static loggedIds = new Set();
   static observer = null;
+  static emitMethod = null;
 
   static start() {
     const tryAttach = () => {
@@ -27,17 +27,28 @@ class ChatLogger {
         characterData: true,
       });
       ChatLogger.scan();
-      console.log('[chat-logger] attached');
+      console.log('[chat-logger v0.2.0] attached');
+      ChatLogger.detectEmitMethod();
     };
     tryAttach();
   }
 
-  static invoke(cmd, args) {
-    try {
-      return window.__TAURI__.core.invoke(cmd, args);
-    } catch (e) {
-      console.error('[chat-logger] invoke failed:', e);
-      return Promise.reject(e);
+  static detectEmitMethod() {
+    // Thử 3 cách emit theo thứ tự ưu tiên:
+    // 1. window.__TAURI__.event.emit (Tauri 2 official, postMessage)
+    // 2. window.__TAURI_INTERNALS__.postMessage (lower-level)
+    // 3. window.__TAURI__.core.invoke (HTTP IPC - bị CSP chặn, fallback cuối)
+    if (window.__TAURI__?.event?.emit) {
+      ChatLogger.emitMethod = 'event';
+      console.log('[chat-logger] using event.emit (postMessage, CSP-safe)');
+    } else if (window.__TAURI_INTERNALS__?.postMessage) {
+      ChatLogger.emitMethod = 'internals';
+      console.log('[chat-logger] using __TAURI_INTERNALS__.postMessage');
+    } else if (window.__TAURI__?.core?.invoke) {
+      ChatLogger.emitMethod = 'invoke';
+      console.log('[chat-logger] using invoke (may fail due to CSP)');
+    } else {
+      console.error('[chat-logger] NO Tauri bridge found — không gửi được message về Rust');
     }
   }
 
@@ -62,12 +73,11 @@ class ChatLogger {
       if (role === 'user') {
         ChatLogger.send(id, convId, role, content);
       } else if (role === 'assistant') {
-        // Chỉ log assistant khi streaming xong — phát hiện qua nút Copy
         const turnContainer = node.closest('[data-testid^="conversation-turn-"]') || node.parentElement;
-        const done =
-          turnContainer &&
-          (turnContainer.querySelector('[data-testid*="copy"]') ||
-            turnContainer.querySelector('button[aria-label*="Copy" i]'));
+        const done = turnContainer && (
+          turnContainer.querySelector('[data-testid*="copy"]') ||
+          turnContainer.querySelector('button[aria-label*="Copy" i]')
+        );
         if (done) {
           ChatLogger.send(id, convId, role, content);
         }
@@ -76,19 +86,37 @@ class ChatLogger {
   }
 
   static send(id, conversationId, role, content) {
-    ChatLogger.loggedIds.add(id); // optimistic — tránh gửi lặp
-    ChatLogger.invoke('log_message', { id, conversationId, role, content })
-      .then(() => {
-        // ok
-      })
-      .catch((err) => {
-        ChatLogger.loggedIds.delete(id); // cho retry lần kế tiếp
-        console.error('[chat-logger] log failed:', err);
-      });
+    ChatLogger.loggedIds.add(id);
+    const payload = { id, conversationId, role, content };
+
+    try {
+      if (ChatLogger.emitMethod === 'event') {
+        // postMessage-based, bypass CSP
+        window.__TAURI__.event.emit('chat-logger://log-message', payload);
+      } else if (ChatLogger.emitMethod === 'internals') {
+        window.__TAURI_INTERNALS__.postMessage({
+          cmd: 'log_message',
+          ...payload,
+        });
+      } else if (ChatLogger.emitMethod === 'invoke') {
+        window.__TAURI__.core.invoke('log_message', payload);
+      }
+    } catch (err) {
+      ChatLogger.loggedIds.delete(id);
+      console.error('[chat-logger] send failed:', err);
+    }
+  }
+
+  // Compact trigger từ Ask.tsx cũng qua event
+  static compact() {
+    if (window.__TAURI__?.event?.emit) {
+      window.__TAURI__.event.emit('chat-logger://compact', {});
+    } else if (window.__TAURI__?.core?.invoke) {
+      window.__TAURI__.core.invoke('compact_session');
+    }
   }
 }
 
 window.addEventListener('DOMContentLoaded', ChatLogger.start);
-// Một số trang SPA không phát DOMContentLoaded khi route thay đổi
 window.addEventListener('popstate', () => setTimeout(ChatLogger.start, 500));
 window.ChatLogger = ChatLogger;
