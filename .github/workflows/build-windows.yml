@@ -1,0 +1,83 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ v0.4.2-http-portable, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package + PyInstaller
+        run: |
+          python -m pip install -e . --disable-pip-version-check
+          python -m pip install pyinstaller --disable-pip-version-check
+
+      - name: Show versions
+        run: python -m pip show mem0-mcp-selfhosted pyinstaller mcp mem0ai
+
+      - name: Create PyInstaller spec
+        shell: bash
+        run: |
+          cat > mem0-mcp.spec << 'SPEC'
+          # -*- mode: python ; coding: utf-8 -*-
+          from PyInstaller.utils.hooks import collect_all
+          datas, binaries, hiddenimports = [], [], []
+          for pkg in ['mem0', 'mcp', 'qdrant_client', 'openai', 'anthropic', 'tiktoken', 'tiktoken_ext']:
+              d, b, h = collect_all(pkg)
+              datas += d; binaries += b; hiddenimports += h
+          hiddenimports += [
+              'mem0_mcp_selfhosted', 'mem0_mcp_selfhosted.server',
+              'mem0_mcp_selfhosted.http_server', 'mem0_mcp_selfhosted.archive_tools',
+              'mem0_mcp_selfhosted.archive_upload', 'mem0_mcp_selfhosted.hooks',
+              'mem0_mcp_selfhosted.config', 'mem0_mcp_selfhosted.env',
+              'mem0_mcp_selfhosted.helpers', 'mem0_mcp_selfhosted.llm_anthropic',
+              'mem0_mcp_selfhosted.llm_ollama', 'mem0_mcp_selfhosted.llm_router',
+              'mem0_mcp_selfhosted.graph_tools',
+              'uvicorn', 'uvicorn.protocols.http.h11_impl',
+              'uvicorn.protocols.websockets.websockets_impl',
+              'uvicorn.lifespan.on', 'starlette', 'dotenv',
+              'tiktoken_ext.openai_public',
+          ]
+          a = Analysis(
+              ['src/mem0_mcp_selfhosted/http_server.py'],
+              pathex=['src'], binaries=binaries, datas=datas,
+              hiddenimports=hiddenimports,
+              excludes=['torch','tensorflow','sentence_transformers','transformers',
+                        'sklearn','scipy','pandas','matplotlib','PIL','IPython',
+                        'jupyter','notebook','pytest','tkinter'],
+          )
+          pyz = PYZ(a.pure, a.zipped_data)
+          exe = EXE(pyz, a.scripts, a.binaries, a.zipfiles, a.datas, [],
+                    name='mem0-mcp', console=True, upx=False, onefile=True)
+          SPEC
+
+      - name: Build EXE
+        run: python -m PyInstaller mem0-mcp.spec --clean --noconfirm
+
+      - name: Show exe info
+        shell: pwsh
+        run: |
+          $exe = "dist\mem0-mcp.exe"
+          if (Test-Path $exe) {
+            $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+            Write-Host "Built: $exe ($size MB)"
+          } else {
+            Write-Host "BUILD FAILED - exe not found"
+            exit 1
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mem0-mcp-exe-v0.4.2
+          path: dist/mem0-mcp.exe
+          retention-days: 30
