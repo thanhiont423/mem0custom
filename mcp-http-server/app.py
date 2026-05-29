@@ -23,6 +23,11 @@ import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 
+try:
+    from . import oauth
+except ImportError:
+    import oauth  # type: ignore
+
 ARCHIVE_URL = os.environ["ARCHIVE_URL"]           # http://archive-api:8001
 ARCHIVE_TOKEN = os.environ["ARCHIVE_AUTH_TOKEN"]
 USER_ID = os.environ.get("USER_ID", "thanh")
@@ -31,22 +36,51 @@ HEADERS = {"Authorization": f"Bearer {ARCHIVE_TOKEN}"}
 
 app = FastAPI(
     title="mem0custom MCP HTTP",
-    description="Remote MCP server for Claude App + ChatGPT App",
-    version="1.0.0",
+    description="Remote MCP server for Claude App + ChatGPT App with OAuth 2.1 + DCR",
+    version="1.1.0",
 )
+
+# Mount OAuth router for /.well-known/* and /register, /authorize, /token
+app.include_router(oauth.router)
+
 
 # ============================================================
 # Auth middleware
 # ============================================================
 
+# Paths that don't require auth (OAuth flow + health + discovery)
+PUBLIC_PATHS = {
+    "/health",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-authorization-server",
+    "/register",
+    "/authorize",
+    "/token",
+}
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    # Allow unauthenticated /health for liveness probes
-    if request.url.path == "/health":
+    path = request.url.path
+    # Strip /mcp prefix if Caddy routes /mcp/* without strip_prefix
+    if path.startswith("/mcp"):
+        path = path[4:] or "/"
+    if path in PUBLIC_PATHS:
         return await call_next(request)
     auth = request.headers.get("authorization", "")
-    if auth != f"Bearer {EXPECTED_BEARER}":
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    if not oauth.verify_token(token):
+        # Include WWW-Authenticate per RFC 6750 + RFC 9728 for discovery
+        return JSONResponse(
+            {"error": "unauthorized"},
+            status_code=401,
+            headers={
+                "WWW-Authenticate": (
+                    'Bearer realm="mcp", '
+                    f'resource_metadata="{oauth.ISSUER}/.well-known/oauth-protected-resource"'
+                )
+            },
+        )
     return await call_next(request)
 
 
