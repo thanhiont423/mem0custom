@@ -293,9 +293,63 @@ jobs:
           path: install.log
           if-no-files-found: ignore
 
+  validate-release:
+    name: Validate release output (deep functional check)
+    needs: smoke-test
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: chatgpt-desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: Download portable exe artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ChatGPT-exe-portable
+          path: ./exe
+
+      - name: Run portable exe, capture lifecycle (auto-portable mode)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path ./exe -Filter "*.exe" -Recurse | Select-Object -First 1
+          if (-not $exe) { Write-Error "No exe found"; exit 1 }
+          Write-Host "Launching: $($exe.FullName)"
+          $proc = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 12
+          $running = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+          if (-not $running) {
+            Write-Error "Process exited unexpectedly"
+            Get-ChildItem -Path ./exe -Recurse | Format-List
+            exit 1
+          }
+          Stop-Process -Id $proc.Id -Force
+          Start-Sleep -Seconds 2
+          Write-Host "Process lifecycle OK"
+
+      - name: Run deep validation script
+        shell: pwsh
+        run: |
+          $exeDir = (Get-Item (Get-ChildItem -Path ./exe -Filter "*.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName)).Directory.FullName
+          pwsh -File tests/validate_release.ps1 -ExeDir $exeDir
+
+      - name: Upload log file as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-log-from-validation
+          path: |
+            ./exe/data/com.nofwl.chatgpt/logs/*.log
+            **/com.nofwl.chatgpt/logs/*.log
+          if-no-files-found: warn
+
   release:
     name: Create GitHub Release
-    needs: [build-windows, smoke-test]
+    needs: [build-windows, smoke-test, validate-release]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
