@@ -272,3 +272,89 @@ fn default_keywords() -> serde_json::Value {
         "/lưu": "compact_session"
     })
 }
+
+
+// ============= v0.4.0 — Summarize current session =============
+
+use crate::core::summarize;
+
+#[command]
+pub async fn summarize_current(
+    app: AppHandle,
+    state: State<'_, HistoryState>,
+) -> Result<String, String> {
+    summarize_current_impl(&app, &state).await
+}
+
+pub async fn summarize_current_impl(
+    app: &AppHandle,
+    state: &State<'_, HistoryState>,
+) -> Result<String, String> {
+    use std::path::PathBuf;
+
+    // Resolve root_dir manually (history::root_dir is private)
+    let root = resolve_root_dir(app)?;
+
+    let cfg = summarize::load_config(&root)
+        .ok_or("summarize disabled or config missing")?;
+    let provider = cfg.providers.get(&cfg.active_provider)
+        .ok_or_else(|| format!("provider '{}' not found in config", cfg.active_provider))?;
+
+    let messages = state.buffer.lock().unwrap().clone();
+    if messages.is_empty() {
+        return Err("no messages in current buffer".into());
+    }
+
+    let transcript = summarize::build_transcript(&messages);
+    log::info!("[summarize] transcript size: {} chars, {} messages",
+               transcript.len(), messages.len());
+
+    let summary = summarize::summarize(provider, &transcript).await?;
+    log::info!("[summarize] result: {} chars", summary.len());
+
+    // Save to file riêng nếu config bật
+    if cfg.output.save_separate_file {
+        let session = state.session.lock().unwrap().clone();
+        if let Some(meta) = session {
+            let summaries_dir = root.join("sessions").join("summaries");
+            let _ = std::fs::create_dir_all(&summaries_dir);
+            let fname = format!("summary_{}_{}.md",
+                meta.session_id,
+                chrono::Local::now().format("%Y%m%d-%H%M%S"));
+            let path = summaries_dir.join(fname);
+            let content = format!("# Summary — session {}
+
+{}
+", meta.session_id, summary);
+            let _ = std::fs::write(&path, content);
+            log::info!("[summarize] wrote separate file: {}", path.display());
+        }
+    }
+
+    Ok(summary)
+}
+
+fn resolve_root_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    // Mirror history::root_dir auto-portable detection
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let exe_str = exe_dir.to_string_lossy().to_lowercase();
+            let in_program_files = exe_str.contains("program files")
+                || exe_str.contains("programfiles")
+                || exe_str.contains("\\windows\\")
+                || exe_str.contains("/applications/")
+                || exe_str.contains("/usr/")
+                || exe_str.contains("/opt/");
+            if !in_program_files {
+                let data = exe_dir.join("data").join("com.nofwl.chatgpt");
+                if data.exists() {
+                    return Ok(data);
+                }
+            }
+        }
+    }
+    let dir = app.path().app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("com.nofwl.chatgpt");
+    Ok(dir)
+}

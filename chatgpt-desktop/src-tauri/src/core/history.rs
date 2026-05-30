@@ -17,6 +17,7 @@ use tauri::{AppHandle, Manager};
 // ---------- Default config files (embedded at compile-time) ----------
 const DEFAULT_INSTRUCTION_MD: &str = include_str!("../../../instruction.md.sample");
 const DEFAULT_KEYWORDS_JSON: &str = include_str!("../../../keywords.json.sample");
+const DEFAULT_SUMMARIZE_JSON: &str = include_str!("../../../summarize.json.sample");
 const DEFAULT_README_DATA: &str = r#"# Data folder — ChatGPT Desktop
 
 Folder này chứa tất cả data của app. Backup folder = backup toàn bộ.
@@ -51,6 +52,7 @@ fn ensure_default_configs(app: &AppHandle) {
     let files: &[(&str, &str)] = &[
         ("instruction.md", DEFAULT_INSTRUCTION_MD),
         ("keywords.json", DEFAULT_KEYWORDS_JSON),
+        ("summarize.json", DEFAULT_SUMMARIZE_JSON),
         ("README.md", DEFAULT_README_DATA),
     ];
 

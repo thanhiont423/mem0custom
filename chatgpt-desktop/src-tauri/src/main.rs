@@ -72,6 +72,7 @@ fn main() {
             cmd::compact_session,
             cmd::get_instruction,
             cmd::get_keywords,
+            cmd::summarize_current,
             window::open_settings,
         ])
         .setup(|app| {
@@ -128,6 +129,20 @@ fn main() {
                 }
             });
 
+
+            // Summarize event từ frontend keyword
+            let sum_handle = app.handle().clone();
+            app.listen_any("chat-logger://summarize_current", move |_event| {
+                log::info!("[event] summarize_current triggered");
+                let h = sum_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = h.state::<HistoryState>();
+                    match crate::core::cmd::summarize_current_impl(&h, &state).await {
+                        Ok(text) => log::info!("[event] summarize OK: {} chars", text.len()),
+                        Err(e) => log::error!("[event] summarize failed: {}", e),
+                    }
+                });
+            });
             setup::init(app)
         })
         .build(tauri::generate_context!())
