@@ -41,7 +41,9 @@ app = FastAPI(
 )
 
 # Mount OAuth router for /.well-known/* and /register, /authorize, /token
-app.include_router(oauth.router)
+# Prefix "/mcp" because Caddy forwards /mcp/* without strip_prefix.
+# Internal routes become /mcp/.well-known/..., /mcp/register, etc.
+app.include_router(oauth.router, prefix="/mcp")
 
 
 # ============================================================
