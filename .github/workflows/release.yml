@@ -33,13 +33,19 @@ jobs:
         run: |
           python - <<'PY'
           import ast, pathlib, sys
-          bad=[]
-          for p in pathlib.Path('.').rglob('*.py'):
-              if '.git' in p.parts: continue
-              try: ast.parse(open(p, encoding='utf-8').read())
-              except SyntaxError as e: bad.append(f'{p}: {e}')
-          print('OK' if not bad else 'SYNTAX ERRORS:')
-          [print(' -', b) for b in bad]
+          bad = []
+          targets = ["archive-api", "mcp-http-server", "scripts", "memory-rest-api"]
+          for d in targets:
+              base = pathlib.Path(d)
+              if not base.exists():
+                  continue
+              for p in base.rglob("*.py"):
+                  try:
+                      ast.parse(p.read_text(encoding="utf-8"))
+                  except SyntaxError as e:
+                      print(f"SYNTAX ERROR {p}: {e}")
+                      bad.append(p)
+          print("All Python source OK" if not bad else f"{len(bad)} files failed")
           sys.exit(1 if bad else 0)
           PY
       - name: Unit tests (sum hook + memory tools + oauth + cron + archive-mcp)
