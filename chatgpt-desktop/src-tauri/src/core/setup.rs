@@ -11,6 +11,39 @@ use tauri_plugin_shell::ShellExt;
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
 
+/// Build script inject window.__INJECTED_KEYWORDS__ với content keywords.json
+/// để chat-logger.js đọc trực tiếp (không cần invoke -> CSP-safe).
+fn build_keywords_inject_script(app: &tauri::AppHandle) -> String {
+    use tauri::Manager;
+    let default = r#"{"compact":"compact_session","lưu":"compact_session","luu":"compact_session","save":"compact_session","xuat":"compact_session","/c":"compact_session","/save":"compact_session","/sum":"summarize_current","/summary":"summarize_current","tóm tắt":"summarize_current","/tóm tắt":"summarize_current","tomtat":"summarize_current"}"#;
+
+    let mut content = default.to_string();
+
+    // Tìm keywords.json (portable hoặc AppData)
+    let candidates = vec![
+        std::env::current_exe().ok()
+            .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+            .map(|d| d.join("data").join("com.nofwl.chatgpt").join("keywords.json")),
+        app.path().app_data_dir().ok()
+            .map(|d| d.join("com.nofwl.chatgpt").join("keywords.json")),
+    ];
+
+    for p in candidates.into_iter().flatten() {
+        if p.exists() {
+            if let Ok(s) = std::fs::read_to_string(&p) {
+                if serde_json::from_str::<serde_json::Value>(&s).is_ok() {
+                    log::info!("[setup] inject keywords from {}", p.display());
+                    content = s;
+                    break;
+                }
+            }
+        }
+    }
+
+    format!("window.__INJECTED_KEYWORDS__ = {};
+", content)
+}
+
 use crate::core::{
     conf::AppConf,
     constant::{ASK_HEIGHT, INIT_SCRIPT, TITLEBAR_HEIGHT},
@@ -91,6 +124,7 @@ pub fn init(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     })
                     .initialization_script(&AppConf::load_script(&handle, "ask.js"))
+                    .initialization_script(&build_keywords_inject_script(&handle))
                     .initialization_script(&AppConf::load_script(&handle, "chat-logger.js"))
                     .initialization_script(INIT_SCRIPT);
 

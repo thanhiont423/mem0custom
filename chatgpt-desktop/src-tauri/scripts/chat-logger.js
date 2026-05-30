@@ -1,15 +1,13 @@
 /**
  * @name chat-logger.js
- * @version 0.4.0
+ * @version 0.5.0
  * @url https://github.com/thanhiont423/mem0custom
  *
- * v0.4.0:
- *   - DYNAMIC KEYWORDS từ file keywords.json (qua Tauri command get_keywords)
- *   - Mỗi keyword map tới 1 action (compact_session / custom event)
- *   - User sửa file -> reload page là active
- *   - Fallback default keywords nếu file không có
- *   - Vẫn giữ CSP-safe via event.emit (postMessage)
- *   - Vẫn hook cả textarea ChatGPT lẫn ô Ask của app
+ * v0.5.0:
+ *   - FIX CSP: Đọc keywords từ window.__INJECTED_KEYWORDS__ (inject bởi Rust setup.rs)
+ *     thay vì invoke('get_keywords') (bị chatgpt.com CSP block ipc.localhost)
+ *   - Vẫn dùng event.emit() (postMessage) cho log_message + compact + summarize_current
+ *   - Vẫn hook textarea ChatGPT + ô Ask của app
  */
 
 const DEFAULT_KEYWORDS = {
@@ -24,28 +22,9 @@ class ChatLogger {
   static loggedIds = new Set();
   static observer = null;
   static emitMethod = null;
-  static keywords = DEFAULT_KEYWORDS;
-  static keywordRegex = ChatLogger.buildRegex(DEFAULT_KEYWORDS);
-
-  static buildRegex(map) {
-    const escaped = Object.keys(map).map((k) =>
-      k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    );
-    return new RegExp("^\\s*(" + escaped.join("|") + ")\\s*$", "i");
-  }
-
-  static async loadKeywords() {
-    try {
-      const result = await window.__TAURI__?.core?.invoke?.("get_keywords");
-      if (result && typeof result === "object") {
-        ChatLogger.keywords = result;
-        ChatLogger.keywordRegex = ChatLogger.buildRegex(result);
-        console.log("[chat-logger] loaded keywords:", Object.keys(result));
-      }
-    } catch (e) {
-      console.warn("[chat-logger] get_keywords failed, using defaults:", e);
-    }
-  }
+  static keywords = (typeof window !== "undefined" && window.__INJECTED_KEYWORDS__)
+    ? window.__INJECTED_KEYWORDS__
+    : DEFAULT_KEYWORDS;
 
   static start() {
     const tryAttach = () => {
@@ -66,10 +45,8 @@ class ChatLogger {
       });
       ChatLogger.scan();
       ChatLogger.hookKeywordTrigger();
-      console.log("[chat-logger v0.4.0] attached");
+      console.log("[chat-logger v0.5.0] attached, keywords:", Object.keys(ChatLogger.keywords));
       ChatLogger.detectEmitMethod();
-      // Load keywords sau detect emit method
-      ChatLogger.loadKeywords();
     };
     tryAttach();
   }
@@ -92,7 +69,6 @@ class ChatLogger {
     return m ? m[1] : "default";
   }
 
-  // Lookup keyword -> action. Returns action name or null.
   static matchKeyword(text) {
     const t = (text || "").trim().toLowerCase();
     for (const [kw, action] of Object.entries(ChatLogger.keywords)) {
@@ -111,7 +87,6 @@ class ChatLogger {
       if (ChatLogger.loggedIds.has(id)) return;
       const content = (node.innerText || "").trim();
       if (!content) return;
-      // Skip nếu content là keyword (đã trigger riêng)
       if (ChatLogger.matchKeyword(content)) {
         ChatLogger.loggedIds.add(id);
         return;
@@ -136,25 +111,17 @@ class ChatLogger {
     textareas.forEach((ta) => {
       if (ta.dataset.kwHooked === "1") return;
       ta.dataset.kwHooked = "1";
-
       const handler = (e) => {
         const text = (ta.value !== undefined ? ta.value : ta.innerText || "").trim();
         const action = ChatLogger.matchKeyword(text);
         if (!action) return;
-
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-
         console.log(`[chat-logger] keyword '${text}' -> action '${action}'`);
         ChatLogger.triggerAction(action);
-
-        // Clear textarea
         if (ta.value !== undefined) {
-          const setter = Object.getOwnPropertyDescriptor(
-            window.HTMLTextAreaElement.prototype,
-            "value"
-          ).set;
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
           setter.call(ta, "");
           ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
         } else {
@@ -162,24 +129,17 @@ class ChatLogger {
           ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
         }
       };
-
-      ta.addEventListener(
-        "keydown",
-        (e) => {
-          if (e.key === "Enter" && !e.shiftKey) handler(e);
-        },
-        true
-      );
+      ta.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) handler(e);
+      }, true);
     });
   }
 
-  // Generic action dispatcher
   static triggerAction(action) {
     try {
       if (action === "compact_session") {
         ChatLogger.triggerCompact();
       } else if (ChatLogger.emitMethod === "event") {
-        // Custom action -> emit qua event channel cùng pattern
         window.__TAURI__.event.emit(`chat-logger://${action}`, {});
       } else if (ChatLogger.emitMethod === "invoke") {
         window.__TAURI__.core.invoke(action).catch((e) =>
