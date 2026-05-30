@@ -70,6 +70,30 @@ def authorization_server_metadata():
     }
 
 
+@router.get("/.well-known/openid-configuration")
+def openid_configuration():
+    """OIDC Discovery 1.0 — fallback for clients that probe OIDC first.
+
+    We are NOT a real OIDC provider (no userinfo, no id_token), but Claude
+    Desktop SDK falls back to this URL after fetching oauth-authorization-server.
+    Return OAuth-compatible metadata so the client treats us as OAuth-only
+    authorization server (no ID token claims).
+    """
+    return {
+        "issuer": ISSUER,
+        "authorization_endpoint": f"{ISSUER}/authorize",
+        "token_endpoint": f"{ISSUER}/token",
+        "registration_endpoint": f"{ISSUER}/register",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"],
+        "scopes_supported": ["mcp"],
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported": ["none"],
+    }
+
+
 @router.post("/register", status_code=201)
 async def register_client(request: Request):
     """RFC 7591 — Dynamic Client Registration. Returns HTTP 201."""

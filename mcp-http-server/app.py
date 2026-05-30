@@ -83,7 +83,8 @@ async def auth_middleware(request: Request, call_next):
     # Strip /mcp prefix if Caddy routes /mcp/* without strip_prefix
     if path.startswith("/mcp"):
         path = path[4:] or "/"
-    if path in PUBLIC_PATHS:
+    # Allow exact public paths AND any /.well-known/* (OAuth + OIDC discovery)
+    if path in PUBLIC_PATHS or path.startswith("/.well-known/"):
         return await call_next(request)
     auth = request.headers.get("authorization", "")
     token = auth[7:] if auth.startswith("Bearer ") else ""
