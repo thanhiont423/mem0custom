@@ -48,14 +48,23 @@ jobs:
           print("All Python source OK" if not bad else f"{len(bad)} files failed")
           sys.exit(1 if bad else 0)
           PY
-      - name: Unit tests (sum hook + memory tools + oauth + cron + archive-mcp)
+      - name: Unit tests (sum hook + cron + archive-mcp)
         run: |
           set -e
           python -m pytest scripts/test_sum_hook.py -q
           python -m pytest scripts/test_r2_budget_check.py -q
           python -m pytest scripts/test_archive_mcp.py -q
-          cd mcp-http-server
-          ARCHIVE_URL=http://x ARCHIVE_AUTH_TOKEN=t MCP_BEARER_TOKEN=t USER_ID=thanh python -m pytest test_memory_tools.py test_oauth.py -q
+      - name: Unit tests (mcp-http-server memory tools)
+        working-directory: mcp-http-server
+        env:
+          ARCHIVE_URL: http://x
+          ARCHIVE_AUTH_TOKEN: t
+          MCP_BEARER_TOKEN: t
+          USER_ID: thanh
+        run: python -m pytest test_memory_tools.py -q
+      - name: Unit tests (mcp-http-server OAuth, isolated process)
+        working-directory: mcp-http-server
+        run: python -m unittest test_oauth -v 2>&1 | tail -30
 
   release:
     name: Publish GitHub Release
