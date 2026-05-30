@@ -51,8 +51,25 @@ services:
       ARCHIVE_AUTH_TOKEN: ${ARCHIVE_AUTH_TOKEN}
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN}
       USER_ID: ${USER_ID:-thanh}
+      MEMORY_API_URL: http://memory-rest-api:8002
+      MEMORY_API_TOKEN: ${CHATGPT_AUTH_TOKEN}
     networks: [memnet]
-    depends_on: [archive-api]
+    depends_on: [archive-api, memory-rest-api]
+    restart: unless-stopped
+
+  memory-rest-api:
+    build: ./memory-rest-api
+    container_name: memory-rest-api
+    environment:
+      CHATGPT_AUTH_TOKEN: ${CHATGPT_AUTH_TOKEN}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DEFAULT_USER_ID: ${USER_ID:-thanh}
+      COLLECTION_NAME: ${COLLECTION_NAME:-mem0_mcp_selfhosted}
+      PUBLIC_URL: ${MEMORY_PUBLIC_URL:-https://claude.hangocthanh.io.vn/memory}
+    networks: [memnet]
+    depends_on: [qdrant]
     restart: unless-stopped
 
   caddy:
