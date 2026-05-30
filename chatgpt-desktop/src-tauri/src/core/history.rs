@@ -497,4 +497,7 @@ mod tests {
             messages: vec![],
         };
         let json = serde_json::to_string(&sf).unwrap();
-        // Khi None, field i
+        // Khi None, field instruction KHÔNG xuất hiện trong JSON (skip_serializing_if)
+        assert!(!json.contains("instruction"));
+    }
+}
