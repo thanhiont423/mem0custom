@@ -467,4 +467,42 @@ pub async fn recover_pending_uploads(root_dir: PathBuf) {
 mod tests {
     use super::*;
 
-    #
+    #[test]
+    fn test_resolve_env_literal() {
+        assert_eq!(resolve_env("hello"), "hello");
+    }
+
+    #[test]
+    fn test_resolve_env_var() {
+        std::env::set_var("__SYNC_TEST_VAR__", "secret123");
+        assert_eq!(resolve_env("${env:__SYNC_TEST_VAR__}"), "secret123");
+    }
+
+    #[test]
+    fn test_resolve_env_missing() {
+        std::env::remove_var("__SYNC_NOT_SET__");
+        assert_eq!(resolve_env("${env:__SYNC_NOT_SET__}"), "");
+    }
+
+    #[test]
+    fn test_build_summary_payload_shape() {
+        let cfg = SyncConfig {
+            enabled: true,
+            archive_url: "http://x".into(),
+            auth_token: "t".into(),
+            user_id: "thanh".into(),
+            project_tag: Some("pj".into()),
+            upload_session_on_compact: true,
+            upload_summary_on_sum: true,
+            timeout_seconds: 30,
+            retry_max: 3,
+            retry_backoff_seconds: 5,
+        };
+        let p = build_summary_payload(&cfg, "hello", "s1234567", 10);
+        assert_eq!(p["user_id"], "thanh");
+        assert_eq!(p["project_tag"], "pj");
+        assert_eq!(p["summary_text"], "hello");
+        assert_eq!(p["messages_before"], 10);
+        assert_eq!(p["metadata"]["local_session_id"], "s1234567");
+    }
+}
