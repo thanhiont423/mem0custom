@@ -129,6 +129,7 @@ Workflow gồm:
 | [`docs/huong-dan-trien-khai-r2-storage.md`](docs/huong-dan-trien-khai-r2-storage.md) | Setup Cloudflare R2 với 4-layer cost protection |
 | [`docs/R2-PROTECTION-LAYERS.md`](docs/R2-PROTECTION-LAYERS.md) | Chi tiết về 4 lớp bảo vệ chi phí R2 |
 | [`docs/NEW-FEATURES.md`](docs/NEW-FEATURES.md) | Mô tả 5 tính năng mới |
+| [`docs/ROADMAP-RAG.md`](docs/ROADMAP-RAG.md) | Lộ trình nâng cấp RAG: reranker, hybrid search, time-aware, HyDE |
 | [`docs/plan-trien-khai-memory-server-mac-windows.md`](docs/plan-trien-khai-memory-server-mac-windows.md) | Plan triển khai gốc (~4200 dòng) |
 
 ## Repo layout
@@ -200,6 +201,18 @@ mem0custom/
 - [ ] Slack/Telegram notification on workflow failure
 - [ ] Multi-user OAuth với consent UI
 - [ ] Per-user token storage trong Postgres
+
+### Nâng cấp RAG (xem chi tiết tại [`docs/ROADMAP-RAG.md`](docs/ROADMAP-RAG.md))
+
+Hệ thống hiện tại là **RAG 1.0** (vector search thuần). Lộ trình nâng cấp lên **RAG 2.0**:
+
+- [ ] **#1 — Reranker (cross-encoder)** — top-20 vector → rerank → top-5; Cohere API hoặc BGE local; kỳ vọng +20-35% precision@5
+- [ ] **#2 — Hybrid search (BM25 + vector)** — fix miss với tên kỹ thuật / proper noun; fuse bằng RRF; kỳ vọng +15-25% recall
+- [ ] **#3 — Embedding tốt hơn cho tiếng Việt** — đổi sang `text-embedding-3-large` hoặc `multilingual-e5-large`; cần re-index
+- [ ] **#4 — Time-aware ranking** — score cuối = α × similarity + β × recency_decay; backup cho cơ chế UPDATE của mem0
+- [ ] **#5 — Query rewriting / HyDE** — Haiku viết lại query mơ hồ trước khi embed; ưu tiên cho ChatGPT App
+
+**Nguyên tắc**: KHÔNG làm trước khi đo. Giai đoạn 1 (06-07/2026) log 50 query thực tế để xác định cải tiến nào cần ưu tiên.
 
 ---
 
