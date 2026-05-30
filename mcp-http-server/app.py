@@ -23,6 +23,7 @@ import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 
 try:
     from . import oauth
@@ -63,44 +64,40 @@ app.include_router(oauth.router, prefix="/mcp")
 
 
 # ============================================================
-# Auth middleware
+# Auth helper (inline check used by /mcp endpoint only)
 # ============================================================
+#
+# NOTE: We avoid @app.middleware("http") because Starlette BaseHTTPMiddleware
+# has a known bug where Content-Length mismatches for responses with multi-byte
+# UTF-8 content (Vietnamese, etc), causing uvicorn RuntimeError and truncated
+# response. See https://github.com/encode/starlette/issues/919
+#
+# OAuth discovery + DCR endpoints (/.well-known/*, /register, /authorize, /token)
+# are already public (no auth check). Only POST /mcp requires Bearer token,
+# enforced inline in mcp_endpoint() below.
 
-# Paths that don't require auth (OAuth flow + health + discovery)
-PUBLIC_PATHS = {
-    "/health",
-    "/.well-known/oauth-protected-resource",
-    "/.well-known/oauth-authorization-server",
-    "/register",
-    "/authorize",
-    "/token",
-}
+
+def _build_401_response() -> JSONResponse:
+    """Build 401 with WWW-Authenticate per RFC 6750 + RFC 9728."""
+    return JSONResponse(
+        {"error": "unauthorized"},
+        status_code=401,
+        headers={
+            "WWW-Authenticate": (
+                f'Bearer realm="mcp", '
+                f'resource_metadata="{oauth.ISSUER}/.well-known/oauth-protected-resource"'
+            )
+        },
+    )
 
 
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    path = request.url.path
-    # Strip /mcp prefix if Caddy routes /mcp/* without strip_prefix
-    if path.startswith("/mcp"):
-        path = path[4:] or "/"
-    # Allow exact public paths AND any /.well-known/* (OAuth + OIDC discovery)
-    if path in PUBLIC_PATHS or path.startswith("/.well-known/"):
-        return await call_next(request)
+def _check_auth(request: Request) -> Optional[JSONResponse]:
+    """Return 401 response if auth invalid, None if OK."""
     auth = request.headers.get("authorization", "")
     token = auth[7:] if auth.startswith("Bearer ") else ""
     if not oauth.verify_token(token):
-        # Include WWW-Authenticate per RFC 6750 + RFC 9728 for discovery
-        return JSONResponse(
-            {"error": "unauthorized"},
-            status_code=401,
-            headers={
-                "WWW-Authenticate": (
-                    'Bearer realm="mcp", '
-                    f'resource_metadata="{oauth.ISSUER}/.well-known/oauth-protected-resource"'
-                )
-            },
-        )
-    return await call_next(request)
+        return _build_401_response()
+    return None
 
 
 # ============================================================
@@ -291,6 +288,10 @@ async def exec_tool(name: str, args: dict):
 @app.post("/mcp")
 async def mcp_endpoint(request: Request):
     """Handle MCP JSON-RPC over HTTP (Streamable HTTP transport)."""
+    # Inline auth check (avoid BaseHTTPMiddleware Content-Length bug)
+    err = _check_auth(request)
+    if err is not None:
+        return err
     body = await request.json()
     method = body.get("method")
     req_id = body.get("id")
