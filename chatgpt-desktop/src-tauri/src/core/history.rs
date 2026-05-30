@@ -18,6 +18,7 @@ use tauri::{AppHandle, Manager};
 const DEFAULT_INSTRUCTION_MD: &str = include_str!("../../../instruction.md.sample");
 const DEFAULT_KEYWORDS_JSON: &str = include_str!("../../../keywords.json.sample");
 const DEFAULT_SUMMARIZE_JSON: &str = include_str!("../../../summarize.json.sample");
+const DEFAULT_SYNC_JSON: &str = include_str!("../../../sync.json.sample");
 const DEFAULT_README_DATA: &str = r#"# Data folder — ChatGPT Desktop
 
 Folder này chứa tất cả data của app. Backup folder = backup toàn bộ.
@@ -53,6 +54,7 @@ fn ensure_default_configs(app: &AppHandle) {
         ("instruction.md", DEFAULT_INSTRUCTION_MD),
         ("keywords.json", DEFAULT_KEYWORDS_JSON),
         ("summarize.json", DEFAULT_SUMMARIZE_JSON),
+        ("sync.json", DEFAULT_SYNC_JSON),
         ("README.md", DEFAULT_README_DATA),
     ];
 
@@ -149,7 +151,7 @@ fn detect_portable_mode() -> Option<PathBuf> {
     }
 }
 
-fn root_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn root_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = if let Some(portable) = detect_portable_mode() {
         portable.join("com.nofwl.chatgpt")
     } else {
@@ -495,7 +497,4 @@ mod tests {
             messages: vec![],
         };
         let json = serde_json::to_string(&sf).unwrap();
-        // Khi None, field instruction KHÔNG xuất hiện trong JSON (skip_serializing_if)
-        assert!(!json.contains("instruction"));
-    }
-}
+        // Khi None, field i

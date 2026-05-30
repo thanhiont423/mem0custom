@@ -312,10 +312,13 @@ pub async fn summarize_current_impl(
     let summary = summarize::summarize(provider, &transcript).await?;
     log::info!("[summarize] result: {} chars", summary.len());
 
+    // Snapshot session_id + message count để dùng cho sync (sau khi đã clone)
+    let session_snapshot = state.session.lock().unwrap().clone();
+    let message_count = messages.len() as u32;
+
     // Save to file riêng nếu config bật
     if cfg.output.save_separate_file {
-        let session = state.session.lock().unwrap().clone();
-        if let Some(meta) = session {
+        if let Some(meta) = &session_snapshot {
             let summaries_dir = root.join("sessions").join("summaries");
             let _ = std::fs::create_dir_all(&summaries_dir);
             let fname = format!("summary_{}_{}.md",
@@ -331,6 +334,16 @@ pub async fn summarize_current_impl(
         }
     }
 
+    // ===== ASYNC SYNC: đẩy summary lên memory server (non-blocking) =====
+    if let Some(meta) = session_snapshot {
+        let root_clone = root.clone();
+        let summary_clone = summary.clone();
+        let sid = meta.session_id.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::core::sync::upload_summary(root_clone, summary_clone, sid, message_count).await;
+        });
+    }
+
     Ok(summary)
 }
 
@@ -340,21 +353,4 @@ fn resolve_root_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         if let Some(exe_dir) = exe.parent() {
             let exe_str = exe_dir.to_string_lossy().to_lowercase();
             let in_program_files = exe_str.contains("program files")
-                || exe_str.contains("programfiles")
-                || exe_str.contains("\\windows\\")
-                || exe_str.contains("/applications/")
-                || exe_str.contains("/usr/")
-                || exe_str.contains("/opt/");
-            if !in_program_files {
-                let data = exe_dir.join("data").join("com.nofwl.chatgpt");
-                if data.exists() {
-                    return Ok(data);
-                }
-            }
-        }
-    }
-    let dir = app.path().app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("com.nofwl.chatgpt");
-    Ok(dir)
-}
+                || exe_str.contains("pr

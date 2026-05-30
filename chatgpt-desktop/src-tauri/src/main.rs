@@ -86,6 +86,13 @@ fn main() {
                 Err(e) => log::error!("[app] init_session failed: {}", e),
             }
 
+            // ===== CRASH RECOVERY: retry các upload còn pending từ lần chạy trước =====
+            if let Ok(root) = core::history::root_dir(&handle) {
+                tauri::async_runtime::spawn(async move {
+                    core::sync::recover_pending_uploads(root).await;
+                });
+            }
+
             let log_handle = app.handle().clone();
             app.listen_any("chat-logger://log-message", move |event| {
                 #[derive(serde::Deserialize)]
@@ -123,12 +130,20 @@ fn main() {
                 log::info!("[event] compact triggered from frontend");
                 let state = compact_handle.state::<HistoryState>();
                 match core::history::compact_session(&compact_handle, &state, "compact") {
-                    Ok(Some(p)) => log::info!("[event] compact OK: {}", p.display()),
+                    Ok(Some(p)) => {
+                        log::info!("[event] compact OK: {}", p.display());
+                        // ===== ASYNC SYNC: đẩy file session lên memory server =====
+                        if let Ok(root) = core::history::root_dir(&compact_handle) {
+                            let session_path = p.clone();
+                            tauri::async_runtime::spawn(async move {
+                                core::sync::upload_session_file(root, session_path).await;
+                            });
+                        }
+                    }
                     Ok(None) => log::info!("[event] compact: empty buffer, only rotated"),
                     Err(e) => log::error!("[event] compact failed: {}", e),
                 }
             });
-
 
             // Summarize event từ frontend keyword
             let sum_handle = app.handle().clone();
@@ -152,7 +167,14 @@ fn main() {
                 log::info!("[app] exit requested, auto-compacting");
                 let state = app_handle.state::<HistoryState>();
                 match core::history::compact_session(app_handle, &state, "app_exit") {
-                    Ok(Some(p)) => log::info!("[app] auto-compact OK: {}", p.display()),
+                    Ok(Some(p)) => {
+                        log::info!("[app] auto-compact OK: {}", p.display());
+                        // SYNC enqueue (chỉ ghi marker, không HTTP để không trì hoãn exit).
+                        // Recovery sẽ retry ở lần khởi động kế tiếp.
+                        if let Ok(root) = core::history::root_dir(app_handle) {
+                            core::sync::enqueue_session_for_upload(&root, &p);
+                        }
+                    }
                     Ok(None) => log::info!("[app] auto-compact: empty buffer"),
                     Err(e) => log::error!("[app] auto-compact failed: {}", e),
                 }
