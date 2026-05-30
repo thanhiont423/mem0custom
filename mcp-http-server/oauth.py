@@ -1,29 +1,10 @@
-"""OAuth 2.1 + RFC 7591 Dynamic Client Registration for Claude Desktop App.
-
-Minimal single-tenant implementation: Claude Desktop registers as a client,
-goes through auth code flow with PKCE (S256), receives an access token that
-maps internally to MCP_BEARER_TOKEN.
-
-Endpoints (mounted under /mcp prefix by mcp-http-server/app.py):
-
-- GET  /.well-known/oauth-protected-resource   resource metadata (RFC 9728)
-- GET  /.well-known/oauth-authorization-server authorization server metadata (RFC 8414)
-- POST /register                                Dynamic Client Registration (RFC 7591)
-- GET  /authorize                               authorization code endpoint (auto-approve)
-- POST /token                                   token exchange with PKCE
-
-Auto-approve design: this is a single-user setup, so /authorize redirects
-back to the client with a code immediately — no user consent prompt.
-
-State storage: in-memory dicts. Restart clears all clients + tokens.
-For single-user use this is acceptable; a multi-user deployment should
-persist to Postgres.
-"""
+"""OAuth 2.1 + RFC 7591 Dynamic Client Registration for Claude Desktop App."""
 from __future__ import annotations
 import base64
 import hashlib
 import os
 import secrets
+import sys
 import time
 import uuid
 from typing import Optional
@@ -36,23 +17,17 @@ from fastapi.responses import JSONResponse, RedirectResponse
 ISSUER = os.environ.get("OAUTH_ISSUER", "https://claude.hangocthanh.io.vn/mcp")
 INTERNAL_TOKEN = os.environ.get("MCP_BEARER_TOKEN", "")
 
-# In-memory state — single user, restart resets
 CLIENTS: dict[str, dict] = {}
 AUTH_CODES: dict[str, dict] = {}
 ACCESS_TOKENS: dict[str, dict] = {}
 
-CODE_LIFETIME_SECONDS = 600         # 10 min
-TOKEN_LIFETIME_SECONDS = 3600       # 1 hour
+CODE_LIFETIME_SECONDS = 600
+TOKEN_LIFETIME_SECONDS = 3600
 
 router = APIRouter()
 
 
-# ============================================================
-# Helpers
-# ============================================================
-
 def _pkce_verify(verifier: str, challenge: str) -> bool:
-    """Verify PKCE: SHA256(verifier) base64url-encoded == challenge."""
     h = hashlib.sha256(verifier.encode("ascii")).digest()
     computed = base64.urlsafe_b64encode(h).decode("ascii").rstrip("=")
     return secrets.compare_digest(computed, challenge)
@@ -63,15 +38,10 @@ def _now() -> float:
 
 
 def reset_state() -> None:
-    """Test helper — clear all state."""
     CLIENTS.clear()
     AUTH_CODES.clear()
     ACCESS_TOKENS.clear()
 
-
-# ============================================================
-# Discovery endpoints
-# ============================================================
 
 @router.get("/.well-known/oauth-protected-resource")
 def protected_resource_metadata():
@@ -100,25 +70,33 @@ def authorization_server_metadata():
     }
 
 
-# ============================================================
-# Dynamic Client Registration (RFC 7591)
-# ============================================================
-
-@router.post("/register")
+@router.post("/register", status_code=201)
 async def register_client(request: Request):
-    """RFC 7591 — Dynamic Client Registration.
+    """RFC 7591 — Dynamic Client Registration. Returns HTTP 201."""
+    # Log everything Claude sends for debugging
+    raw_body = await request.body()
+    headers = dict(request.headers)
+    print(f"[DCR] Origin={headers.get('origin','-')} UA={headers.get('user-agent','-')[:80]}", flush=True)
+    print(f"[DCR] Content-Type={headers.get('content-type','-')}", flush=True)
+    print(f"[DCR] Raw body: {raw_body.decode('utf-8', errors='replace')[:500]}", flush=True)
 
-    Accepts client metadata, returns assigned client_id. No secret since
-    public client (PKCE provides security).
-    """
     try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(400, "invalid_client_metadata: body not JSON")
+        import json as _json
+        body = _json.loads(raw_body) if raw_body else {}
+    except Exception as e:
+        print(f"[DCR] JSON parse error: {e}", flush=True)
+        return JSONResponse(
+            {"error": "invalid_client_metadata", "error_description": "body not JSON"},
+            status_code=400,
+        )
 
     redirect_uris = body.get("redirect_uris", [])
     if not redirect_uris or not isinstance(redirect_uris, list):
-        raise HTTPException(400, "invalid_redirect_uri: redirect_uris required")
+        print(f"[DCR] redirect_uris invalid: {redirect_uris}", flush=True)
+        return JSONResponse(
+            {"error": "invalid_redirect_uri", "error_description": "redirect_uris required (list of URIs)"},
+            status_code=400,
+        )
 
     client_id = str(uuid.uuid4())
     issued_at = int(_now())
@@ -132,21 +110,28 @@ async def register_client(request: Request):
         "registered_at": _now(),
     }
 
-    return {
-        "client_id": client_id,
-        "client_id_issued_at": issued_at,
-        "client_secret_expires_at": 0,
-        "redirect_uris": redirect_uris,
-        "grant_types": CLIENTS[client_id]["grant_types"],
-        "response_types": CLIENTS[client_id]["response_types"],
-        "token_endpoint_auth_method": "none",
-        "client_name": CLIENTS[client_id]["client_name"],
-    }
+    print(f"[DCR] Registered client_id={client_id[:8]} name={body.get('client_name','-')}", flush=True)
 
+    return JSONResponse(
+        status_code=201,
+        headers={
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+        },
+        content={
+            "client_id": client_id,
+            "client_id_issued_at": issued_at,
+            "client_secret_expires_at": 0,
+            "redirect_uris": redirect_uris,
+            "grant_types": CLIENTS[client_id]["grant_types"],
+            "response_types": CLIENTS[client_id]["response_types"],
+            "token_endpoint_auth_method": "none",
+            "client_name": CLIENTS[client_id]["client_name"],
+            "application_type": body.get("application_type", "web"),
+            "scope": body.get("scope", "mcp"),
+        },
+    )
 
-# ============================================================
-# Authorization endpoint
-# ============================================================
 
 @router.get("/authorize")
 def authorize(
@@ -158,16 +143,14 @@ def authorize(
     state: Optional[str] = None,
     scope: Optional[str] = None,
 ):
-    """OAuth 2.1 authorization endpoint with PKCE.
-
-    Auto-approves (single user) — no consent UI. Returns 302 redirect
-    to client's redirect_uri with code (and state if provided).
-    """
+    """OAuth 2.1 authorization endpoint with PKCE."""
+    print(f"[AUTH] client_id={client_id[:8] if client_id else '-'} redirect={redirect_uri}", flush=True)
     if response_type != "code":
         raise HTTPException(400, "unsupported_response_type")
     if code_challenge_method != "S256":
         raise HTTPException(400, "unsupported_code_challenge_method")
     if client_id not in CLIENTS:
+        print(f"[AUTH] CLIENTS keys: {list(CLIENTS.keys())[:5]}", flush=True)
         raise HTTPException(400, "invalid_client")
     if redirect_uri not in CLIENTS[client_id]["redirect_uris"]:
         raise HTTPException(400, "invalid_redirect_uri")
@@ -190,10 +173,6 @@ def authorize(
     return RedirectResponse(url=redirect, status_code=302)
 
 
-# ============================================================
-# Token endpoint
-# ============================================================
-
 @router.post("/token")
 async def token_exchange(
     grant_type: str = Form(...),
@@ -202,18 +181,13 @@ async def token_exchange(
     client_id: str = Form(...),
     code_verifier: str = Form(...),
 ):
-    """OAuth 2.1 token endpoint with PKCE.
-
-    Exchanges authorization code + PKCE verifier for access token.
-    """
+    """OAuth 2.1 token endpoint with PKCE."""
+    print(f"[TOKEN] client_id={client_id[:8]} grant_type={grant_type}", flush=True)
     if grant_type != "authorization_code":
-        return JSONResponse(
-            {"error": "unsupported_grant_type"}, status_code=400
-        )
+        return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
     auth = AUTH_CODES.get(code)
     if not auth:
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
-    # One-time use
     del AUTH_CODES[code]
 
     if auth["client_id"] != client_id:
@@ -235,23 +209,21 @@ async def token_exchange(
         "scope": auth.get("scope", "mcp"),
     }
 
-    return {
-        "access_token": access_token,
-        "token_type": "Bearer",
-        "expires_in": TOKEN_LIFETIME_SECONDS,
-        "scope": auth.get("scope", "mcp"),
-    }
+    return JSONResponse(
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        content={
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": TOKEN_LIFETIME_SECONDS,
+            "scope": auth.get("scope", "mcp"),
+        },
+    )
 
-
-# ============================================================
-# Token verification (called from main app auth middleware)
-# ============================================================
 
 def verify_token(token: str) -> bool:
     """Return True if token is valid (either internal or OAuth-issued)."""
     if not token:
         return False
-    # Internal static token always valid (for direct API access)
     if INTERNAL_TOKEN and secrets.compare_digest(token, INTERNAL_TOKEN):
         return True
     info = ACCESS_TOKENS.get(token)

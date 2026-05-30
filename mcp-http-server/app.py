@@ -44,17 +44,15 @@ app = FastAPI(
 # CORS: Claude Desktop App + ChatGPT App fetch OAuth endpoints from browser
 # context (claude.ai / chatgpt.com). Without CORS, preflight OPTIONS returns
 # 405 and DCR fails with "Couldn't register".
+# Wildcard origin since DCR/OAuth flow uses public PKCE (no credentials).
+# Claude Desktop may use various Origin headers (claude.ai, app://, null, etc).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://claude.ai",
-        "https://chat.openai.com",
-        "https://chatgpt.com",
-    ],
+    allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["WWW-Authenticate"],
+    expose_headers=["WWW-Authenticate", "Content-Type"],
     max_age=3600,
 )
 

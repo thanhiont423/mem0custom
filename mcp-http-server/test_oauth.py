@@ -90,7 +90,7 @@ class TestRegistration(unittest.TestCase):
             "client_name": "Claude Desktop",
             "redirect_uris": ["http://localhost:6274/callback"],
         })
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 201)
         data = r.json()
         self.assertIn("client_id", data)
         self.assertTrue(len(data["client_id"]) >= 32)
