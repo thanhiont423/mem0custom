@@ -121,6 +121,7 @@ async def register_client(request: Request):
         raise HTTPException(400, "invalid_redirect_uri: redirect_uris required")
 
     client_id = str(uuid.uuid4())
+    issued_at = int(_now())
     CLIENTS[client_id] = {
         "client_id": client_id,
         "redirect_uris": redirect_uris,
@@ -133,6 +134,8 @@ async def register_client(request: Request):
 
     return {
         "client_id": client_id,
+        "client_id_issued_at": issued_at,
+        "client_secret_expires_at": 0,
         "redirect_uris": redirect_uris,
         "grant_types": CLIENTS[client_id]["grant_types"],
         "response_types": CLIENTS[client_id]["response_types"],

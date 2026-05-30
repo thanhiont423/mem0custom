@@ -22,6 +22,7 @@ import asyncio
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 try:
     from . import oauth
@@ -37,7 +38,24 @@ HEADERS = {"Authorization": f"Bearer {ARCHIVE_TOKEN}"}
 app = FastAPI(
     title="mem0custom MCP HTTP",
     description="Remote MCP server for Claude App + ChatGPT App with OAuth 2.1 + DCR",
-    version="1.1.0",
+    version="1.2.0",
+)
+
+# CORS: Claude Desktop App + ChatGPT App fetch OAuth endpoints from browser
+# context (claude.ai / chatgpt.com). Without CORS, preflight OPTIONS returns
+# 405 and DCR fails with "Couldn't register".
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://claude.ai",
+        "https://chat.openai.com",
+        "https://chatgpt.com",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["WWW-Authenticate"],
+    max_age=3600,
 )
 
 # Mount OAuth router for /.well-known/* and /register, /authorize, /token
@@ -285,7 +303,7 @@ async def mcp_endpoint(request: Request):
             "result": {
                 "protocolVersion": "2025-03-26",
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "mem0custom-archive", "version": "1.0.0"},
+                "serverInfo": {"name": "mem0custom-archive", "version": "1.2.0"},
             },
         }
 
