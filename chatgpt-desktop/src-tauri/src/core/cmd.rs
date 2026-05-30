@@ -290,10 +290,8 @@ pub async fn summarize_current_impl(
     app: &AppHandle,
     state: &State<'_, HistoryState>,
 ) -> Result<String, String> {
-    use std::path::PathBuf;
-
-    // Resolve root_dir manually (history::root_dir is private)
-    let root = resolve_root_dir(app)?;
+    // Dùng helper public từ history (đã expose ở v0.5.0)
+    let root = crate::core::history::root_dir(app)?;
 
     let cfg = summarize::load_config(&root)
         .ok_or("summarize disabled or config missing")?;
@@ -325,10 +323,7 @@ pub async fn summarize_current_impl(
                 meta.session_id,
                 chrono::Local::now().format("%Y%m%d-%H%M%S"));
             let path = summaries_dir.join(fname);
-            let content = format!("# Summary — session {}
-
-{}
-", meta.session_id, summary);
+            let content = format!("# Summary — session {}\n\n{}\n", meta.session_id, summary);
             let _ = std::fs::write(&path, content);
             log::info!("[summarize] wrote separate file: {}", path.display());
         }
@@ -346,11 +341,3 @@ pub async fn summarize_current_impl(
 
     Ok(summary)
 }
-
-fn resolve_root_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    // Mirror history::root_dir auto-portable detection
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let exe_str = exe_dir.to_string_lossy().to_lowercase();
-            let in_program_files = exe_str.contains("program files")
-                || exe_str.contains("pr
