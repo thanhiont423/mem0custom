@@ -173,17 +173,52 @@ jobs:
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
             -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_old_sessions","arguments":{"limit":3}}}')
+          echo "=== RAW RESPONSE (first 1500 chars) ==="
+          echo "$resp" | head -c 1500
+          echo ""
+          echo "=== END RAW ==="
+          # Parse — accept either valid inner JSON OR error message
           echo "$resp" | python3 -c "
           import sys, json
           r = json.load(sys.stdin)
-          if 'error' in r and r.get('error'):
-              print('FAIL tool error:', r['error']); sys.exit(1)
-          content = r.get('result', {}).get('content', [])
+          if r.get('error'):
+              print('FAIL JSON-RPC error:', r['error']); sys.exit(1)
+          result = r.get('result', {})
+          if result.get('isError'):
+              content = result.get('content', [])
+              text = content[0]['text'] if content else 'no content'
+              print(f'FAIL tool isError=True: {text[:500]}'); sys.exit(1)
+          content = result.get('content', [])
           if not content:
               print('FAIL no content blocks'); sys.exit(1)
-          inner = json.loads(content[0]['text'])
-          print(f'tools/call OK, inner type={type(inner).__name__}')
+          text = content[0]['text']
+          print(f'Content[0].text preview (200ch): {text[:200]}')
+          # Try parse as JSON (some tools return JSON string, some return plain text)
+          try:
+              inner = json.loads(text)
+              print(f'tools/call OK, inner type={type(inner).__name__}, count={len(inner) if hasattr(inner, "__len__") else "-"}')
+          except json.JSONDecodeError as e:
+              print(f'FAIL text is not JSON: {e}')
+              sys.exit(1)
           "
+
+      - name: Debug archive-api logs if tools/call fails
+        if: failure() && (contains(steps.svc.outputs.service, 'mcp') || steps.svc.outputs.service == 'all')
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            echo "=== archive-api logs (last 50) ==="
+            docker logs --tail 50 memory-archive-api 2>&1 | tail -50
+            echo ""
+            echo "=== mcp-http-server logs (last 30) ==="
+            docker logs --tail 30 memory-mcp-http 2>&1 | tail -30
+            echo ""
+            echo "=== Container status ==="
+            docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "archive|mcp|qdrant|caddy"
 
       - name: Verify no RuntimeError in container logs
         if: contains(steps.svc.outputs.service, 'mcp') || steps.svc.outputs.service == 'all'
