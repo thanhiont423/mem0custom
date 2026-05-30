@@ -106,6 +106,8 @@ jobs:
           script: |
             set -e
             cd ~/memory-stack
+            echo "=== Ensure MCP->memory auth (additive override) ==="
+            printf 'services:\n  mcp-http-server:\n    environment:\n      MEMORY_API_URL: http://memory-rest-api:8002\n      MEMORY_API_TOKEN: ${CHATGPT_AUTH_TOKEN}\n' > docker-compose.override.yml
             echo "=== Login to GHCR ==="
             echo "$GHCR_TOKEN" | docker login ghcr.io -u thanhiont423 --password-stdin || true
             echo "=== Pull latest images ==="
