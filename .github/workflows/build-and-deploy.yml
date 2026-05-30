@@ -106,7 +106,7 @@ jobs:
           script: |
             set -e
             cd ~/memory-stack
-            echo "=== Login to GHCR (using token from VPS .env) ==="
+            echo "=== Login to GHCR ==="
             echo "$GHCR_TOKEN" | docker login ghcr.io -u thanhiont423 --password-stdin || true
             echo "=== Pull latest images ==="
             SVC="${{ steps.svc.outputs.service }}"
@@ -123,13 +123,81 @@ jobs:
 
       - name: Smoke test /health
         run: |
-          sleep 5
+          sleep 8
           code=$(curl -s -o /dev/null -w "%{http_code}" https://claude.hangocthanh.io.vn/health)
-          test "$code" = "200" && echo "✅ /health OK" || (echo "❌ Got $code" && exit 1)
+          test "$code" = "200" && echo "/health OK" || (echo "Got $code" && exit 1)
 
-      - name: Smoke test OAuth discovery (if mcp deployed)
+      - name: Smoke test OAuth discovery (3 endpoints)
         if: contains(steps.svc.outputs.service, 'mcp') || steps.svc.outputs.service == 'all'
         run: |
           sleep 3
-          code=$(curl -s -o /dev/null -w "%{http_code}" https://claude.hangocthanh.io.vn/mcp/.well-known/oauth-authorization-server)
-          test "$code" = "200" && echo "✅ OAuth discovery OK" || (echo "❌ Got $code" && exit 1)
+          for path in oauth-authorization-server oauth-protected-resource openid-configuration; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "https://claude.hangocthanh.io.vn/mcp/.well-known/$path")
+            test "$code" = "200" && echo "/.well-known/$path OK" || (echo "/.well-known/$path got $code" && exit 1)
+          done
+
+      - name: Smoke test DCR /register (should be 201)
+        if: contains(steps.svc.outputs.service, 'mcp') || steps.svc.outputs.service == 'all'
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST https://claude.hangocthanh.io.vn/mcp/register \
+            -H "Content-Type: application/json" \
+            -d '{"client_name":"CI Test","redirect_uris":["https://claude.ai/api/mcp/auth_callback"]}')
+          test "$code" = "201" && echo "DCR returns 201 OK" || (echo "DCR got $code expected 201" && exit 1)
+
+      - name: Smoke test MCP tools/list
+        if: contains(steps.svc.outputs.service, 'mcp') || steps.svc.outputs.service == 'all'
+        env:
+          TOKEN: ${{ secrets.MCP_BEARER_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "Skipped: MCP_BEARER_TOKEN not set in repo secrets"
+            exit 0
+          fi
+          resp=$(curl -s -X POST https://claude.hangocthanh.io.vn/mcp \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+          count=$(echo "$resp" | python3 -c "import sys,json; r=json.load(sys.stdin); print(len(r.get('result',{}).get('tools',[])))")
+          test "$count" -ge "6" && echo "tools/list returned $count tools" || (echo "Expected ge 6 tools got $count Body: $resp" && exit 1)
+
+      - name: Smoke test MCP tools/call list_old_sessions
+        if: contains(steps.svc.outputs.service, 'mcp') || steps.svc.outputs.service == 'all'
+        env:
+          TOKEN: ${{ secrets.MCP_BEARER_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "Skipped: MCP_BEARER_TOKEN not set"
+            exit 0
+          fi
+          resp=$(curl -s -X POST https://claude.hangocthanh.io.vn/mcp \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_old_sessions","arguments":{"limit":3}}}')
+          echo "$resp" | python3 -c "
+          import sys, json
+          r = json.load(sys.stdin)
+          if 'error' in r and r.get('error'):
+              print('FAIL tool error:', r['error']); sys.exit(1)
+          content = r.get('result', {}).get('content', [])
+          if not content:
+              print('FAIL no content blocks'); sys.exit(1)
+          inner = json.loads(content[0]['text'])
+          print(f'tools/call OK, inner type={type(inner).__name__}')
+          "
+
+      - name: Verify no RuntimeError in container logs
+        if: contains(steps.svc.outputs.service, 'mcp') || steps.svc.outputs.service == 'all'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            errors=$(docker logs --since 3m memory-mcp-http 2>&1 | grep -iE "RuntimeError|Response content longer|Traceback" | head -5)
+            if [ -n "$errors" ]; then
+              echo "FAIL Found errors in last 3m:"
+              echo "$errors"
+              exit 1
+            fi
+            echo "OK No RuntimeError in container logs"
