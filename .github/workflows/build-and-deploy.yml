@@ -196,7 +196,8 @@ jobs:
           # Try parse as JSON (some tools return JSON string, some return plain text)
           try:
               inner = json.loads(text)
-              print(f'tools/call OK, inner type={type(inner).__name__}, count={len(inner) if hasattr(inner, "__len__") else "-"}')
+              n = len(inner) if hasattr(inner, '__len__') else -1
+              print(f'tools/call OK, inner type={type(inner).__name__}, count={n}')
           except json.JSONDecodeError as e:
               print(f'FAIL text is not JSON: {e}')
               sys.exit(1)
