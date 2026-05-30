@@ -15,7 +15,7 @@ use tauri::TitleBarStyle;
 /// để chat-logger.js đọc trực tiếp (không cần invoke -> CSP-safe).
 fn build_keywords_inject_script(app: &tauri::AppHandle) -> String {
     use tauri::Manager;
-    let default = r#"{"compact":"compact_session","lưu":"compact_session","luu":"compact_session","save":"compact_session","xuat":"compact_session","/c":"compact_session","/save":"compact_session","/sum":"summarize_current","/summary":"summarize_current","tóm tắt":"summarize_current","/tóm tắt":"summarize_current","tomtat":"summarize_current"}"#;
+    let default = r#"{"compact":"compact_session","/compact":"compact_session","lưu":"compact_session","/lưu":"compact_session","luu":"compact_session","save":"compact_session","xuat":"compact_session","/c":"compact_session","/save":"compact_session","/sum":"summarize_current","/summary":"summarize_current","tóm tắt":"summarize_current","/tóm tắt":"summarize_current","tomtat":"summarize_current"}"#;
 
     let mut content = default.to_string();
 
