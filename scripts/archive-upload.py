@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Upload Claude Code session transcripts to archive API.
 
-Reads ~/.claude/projects/**/*.jsonl, parses each session, POSTs new ones
-to the archive-api. Tracks uploaded files in ~/.cache/claude-archive-state.json
-to avoid re-uploading.
+NEW on branch new-features:
+- After upload, calls /sessions/{id}/summarize to generate LLM summary + embedding
+  (only if SUMMARIZE_ON_UPLOAD=1).
 
 Required env vars:
     ARCHIVE_URL          e.g. https://claude.hangocthanh.io.vn/archive
     ARCHIVE_AUTH_TOKEN   bearer token (matches VPS .env)
     USER_ID              default "thanh"
+
+Optional:
+    SUMMARIZE_ON_UPLOAD  set to "1" to trigger LLM summary after each upload
 """
 import json
 import os
@@ -20,6 +23,7 @@ import urllib.request
 ARCHIVE_URL = os.environ["ARCHIVE_URL"]
 ARCHIVE_TOKEN = os.environ["ARCHIVE_AUTH_TOKEN"]
 USER_ID = os.environ.get("USER_ID", "thanh")
+SUMMARIZE = os.environ.get("SUMMARIZE_ON_UPLOAD") == "1"
 STATE_FILE = Path.home() / ".cache" / "claude-archive-state.json"
 STATE_FILE.parent.mkdir(exist_ok=True)
 
@@ -77,7 +81,7 @@ def parse_session(jsonl_path: Path):
         "ended_at": max(times),
         "message_count": len(messages),
         "transcript": messages,
-        "summary": (first_user or "")[:200],
+        "summary": (first_user or "")[:200],  # fallback; LLM summary added later
         "metadata": {"source_file": jsonl_path.name},
     }
 
@@ -91,7 +95,19 @@ def upload(data):
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read())
+
+
+def trigger_summary(session_id: str):
+    """Tell archive-api to generate LLM summary + embedding for this session."""
+    req = urllib.request.Request(
+        f"{ARCHIVE_URL}/sessions/{session_id}/summarize",
+        data=b"",  # empty POST body
+        headers={"Authorization": f"Bearer {ARCHIVE_TOKEN}"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read())
 
 
@@ -111,10 +127,17 @@ def main():
         if not data:
             continue
         try:
-            upload(data)
+            result = upload(data)
             uploaded.add(fid)
             new += 1
-            print(f"Uploaded {jsonl.name} -> project={data['project_tag']}")
+            print(f"Uploaded {jsonl.name} -> project={data['project_tag']} id={result['id']}")
+
+            if SUMMARIZE:
+                try:
+                    s = trigger_summary(result["id"])
+                    print(f"  + LLM summary: {s['summary'][:80]}...")
+                except Exception as e:
+                    print(f"  ! summarize failed: {e}", file=sys.stderr)
         except Exception as e:
             print(f"Failed {jsonl.name}: {e}", file=sys.stderr)
     state["uploaded"] = list(uploaded)
