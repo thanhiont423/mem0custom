@@ -207,25 +207,45 @@ mem0custom/
 
 Nếu project này hữu ích cho bạn, mời tác giả một ly cà phê để duy trì server + động lực phát triển tính năng mới:
 
-### Vietnam
+### 🇻🇳 Vietnam (tất cả ngân hàng VN qua số điện thoại)
 
-- **Vietcombank**: `0123456789` (HA NGOC THANH)
-- **Momo**: `0987654321`
-- **ZaloPay**: `0987654321`
+**Số tài khoản: `0869649888`**
 
-### International
+Chủ tài khoản: **HÀ NGỌC THANH**
+
+Áp dụng cho mọi ngân hàng Việt Nam:
+
+- Vietcombank
+- VietinBank
+- BIDV
+- Agribank
+- Techcombank
+- MB Bank
+- VPBank
+- TPBank
+- ACB
+- Sacombank
+- HDBank
+- SHB
+- VIB
+- OCB
+- ... (mọi ngân hàng khác có hỗ trợ chuyển khoản qua số điện thoại / Napas 247)
+
+### 📱 Ví điện tử
+
+- **Momo**: `0869649888`
+- **ZaloPay**: `0869649888`
+- **ViettelPay**: `0869649888`
+
+### 🌍 International
 
 - **Buy Me a Coffee**: [buymeacoffee.com/thanhhang](https://buymeacoffee.com/thanhhang)
 - **PayPal**: [paypal.me/thanhhang](https://paypal.me/thanhhang)
-- **Ko-fi**: [ko-fi.com/thanhhang](https://ko-fi.com/thanhhang)
 
-### Crypto
+### ₿ Crypto
 
-- **USDT (TRC20)**: `TRxxxxxxxxxxxxxxxxxxxxxxxx`
-- **USDT (BEP20)**: `0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
-- **BTC**: `bc1qxxxxxxxxxxxxxxxxxxxxxxxxxxx`
-
-*(Thay số tài khoản/địa chỉ trên bằng thông tin thật của bạn trước khi public)*
+- **USDT (TRC20)**: liên hệ qua email để nhận địa chỉ
+- **BTC**: liên hệ qua email để nhận địa chỉ
 
 Mọi đóng góp dù 10K, 50K hay $1 đều được trân trọng và động viên rất nhiều. Cảm ơn các bạn! ❤️
 
