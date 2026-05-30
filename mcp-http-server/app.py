@@ -14,6 +14,8 @@ Tools exposed (same as archive-mcp.py stdio version, plus continuation):
 - load_context_for_continuation   (use case 3c — RAG/compressed/full)
 - search                          (alias for ChatGPT deep-research compatibility)
 - fetch                           (alias for ChatGPT deep-research compatibility)
+- add_memory                      (save fact/summary to mem0 long-term memory)
+- search_memories                 (semantic recall from mem0)
 """
 from __future__ import annotations
 import os
@@ -35,6 +37,12 @@ ARCHIVE_TOKEN = os.environ["ARCHIVE_AUTH_TOKEN"]
 USER_ID = os.environ.get("USER_ID", "thanh")
 EXPECTED_BEARER = os.environ["MCP_BEARER_TOKEN"]
 HEADERS = {"Authorization": f"Bearer {ARCHIVE_TOKEN}"}
+
+# Memory REST API (mem0 wrapper) — powers add_memory / search_memories.
+# Cung backend voi ChatGPT Custom GPT (memory-rest-api), share Qdrant collection.
+MEMORY_API_URL = os.environ.get("MEMORY_API_URL", "http://memory-rest-api:8002")
+MEMORY_API_TOKEN = os.environ.get("MEMORY_API_TOKEN", "")
+MEM_HEADERS = {"Authorization": f"Bearer {MEMORY_API_TOKEN}"} if MEMORY_API_TOKEN else {}
 
 app = FastAPI(
     title="mem0custom MCP HTTP",
@@ -193,6 +201,37 @@ TOOLS = [
             "required": ["session_id"],
         },
     },
+    {
+        "name": "add_memory",
+        "description": (
+            "Save an important fact, preference, decision, or session summary to "
+            "long-term memory (mem0). mem0 auto-extracts and de-duplicates facts. "
+            "Use when the user says remember this, or to persist a /sum summary."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Fact(s)/summary to remember; one fact per line is fine."},
+                "metadata": {"type": "object", "description": "Optional JSON metadata (e.g. project, date)."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "search_memories",
+        "description": (
+            "Semantic search over long-term memories (mem0). "
+            "Use to recall what the user told you before about a topic."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query"],
+        },
+    },
     # ChatGPT deep-research compatibility — aliases
     {
         "name": "search",
@@ -229,6 +268,19 @@ async def call_archive(method: str, path: str, **kwargs):
             r = await c.get(f"{ARCHIVE_URL}{path}", **kwargs)
         elif method == "POST":
             r = await c.post(f"{ARCHIVE_URL}{path}", **kwargs)
+        else:
+            raise ValueError(method)
+        r.raise_for_status()
+        return r.json()
+
+
+async def call_memory(method: str, path: str, **kwargs):
+    """Goi memory-rest-api (mem0 wrapper). Dung cho add_memory/search_memories."""
+    async with httpx.AsyncClient(timeout=60, headers=MEM_HEADERS) as c:
+        if method == "GET":
+            r = await c.get(f"{MEMORY_API_URL}{path}", **kwargs)
+        elif method == "POST":
+            r = await c.post(f"{MEMORY_API_URL}{path}", **kwargs)
         else:
             raise ValueError(method)
         r.raise_for_status()
@@ -276,6 +328,19 @@ async def exec_tool(name: str, args: dict):
             params["query"] = args["query"]
         return await call_archive(
             "GET", f"/sessions/{args['session_id']}/context", params=params,
+        )
+
+    if name == "add_memory":
+        body = {"text": args["text"], "user_id": USER_ID}
+        if args.get("metadata"):
+            body["metadata"] = args["metadata"]
+        return await call_memory("POST", "/memories", json=body)
+
+    if name == "search_memories":
+        q = args.get("query") or args.get("q")
+        return await call_memory(
+            "POST", "/memories/search",
+            json={"query": q, "user_id": USER_ID, "limit": args.get("limit", 10)},
         )
 
     raise HTTPException(400, f"Unknown tool: {name}")

@@ -1,0 +1,13 @@
+{
+  "_comment": "Doi ten file nay thanh settings.json de bat hook tu tom tat cuoi phien. Xem docs/huong-dan-lenh-sum.md. LUU Y: neu da bat auto-upload transcript cua v0.4.2 thi can nhac tranh trung (xem muc 'Tranh trung' trong docs).",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "python scripts/sum_hook.py" }
+        ]
+      }
+    ]
+  }
+}
