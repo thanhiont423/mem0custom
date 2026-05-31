@@ -153,7 +153,7 @@ jobs:
           tag_name: ${{ needs.plan.outputs.tag }}
           name: ${{ needs.plan.outputs.title }}
           body_path: RELEASE_NOTES.md
-          append_body: true
+          append_body: false
           generate_release_notes: true
           draft: false
           prerelease: false
