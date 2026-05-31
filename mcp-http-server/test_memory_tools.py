@@ -44,8 +44,15 @@ class TestExecMemoryTools(unittest.TestCase):
         self._orig = app.call_memory
         app.call_memory = fake_memory
 
+        async def fake_archive(method, path, **kwargs):
+            self.calls.append(("ARCHIVE", method, path, kwargs))
+            return {"id": "sess-1"}
+        self._orig_arch = app.call_archive
+        app.call_archive = fake_archive
+
     def tearDown(self):
         app.call_memory = self._orig
+        app.call_archive = self._orig_arch
 
     def test_add_memory_posts_text_and_user(self):
         run(app.exec_tool("add_memory", {"text": "Thanh thich Haiku"}))
@@ -73,6 +80,36 @@ class TestExecMemoryTools(unittest.TestCase):
     def test_search_memories_default_limit(self):
         run(app.exec_tool("search_memories", {"query": "x"}))
         self.assertEqual(self.calls[0][2]["json"]["limit"], 10)
+
+
+class TestSaveFullSession(unittest.TestCase):
+    def test_tool_listed(self):
+        names = {t["name"] for t in app.TOOLS}
+        self.assertIn("save_full_session", names)
+
+    def test_schema_requires_transcript(self):
+        t = next(t for t in app.TOOLS if t["name"] == "save_full_session")
+        self.assertEqual(t["inputSchema"]["required"], ["transcript"])
+
+    def test_exec_posts_full_transcript(self):
+        calls = []
+        async def fake_archive(method, path, **kwargs):
+            calls.append((method, path, kwargs)); return {"id": "s1"}
+        orig = app.call_archive
+        app.call_archive = fake_archive
+        try:
+            msgs = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "yo"}]
+            res = run(app.exec_tool("save_full_session", {"transcript": msgs, "summary": "s"}))
+        finally:
+            app.call_archive = orig
+        self.assertEqual(res["id"], "s1")
+        method, path, kwargs = calls[0]
+        self.assertEqual((method, path), ("POST", "/sessions"))
+        body = kwargs["json"]
+        self.assertEqual(body["message_count"], 2)
+        self.assertEqual(body["transcript"], msgs)
+        self.assertEqual(body["summary"], "s")
+        self.assertEqual(body["user_id"], app.USER_ID)
 
 
 if __name__ == "__main__":
