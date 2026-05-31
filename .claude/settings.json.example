@@ -1,11 +1,19 @@
 {
-  "_comment": "Doi ten file nay thanh settings.json de bat hook tu tom tat cuoi phien. Xem docs/huong-dan-lenh-sum.md. LUU Y: neu da bat auto-upload transcript cua v0.4.2 thi can nhac tranh trung (xem muc 'Tranh trung' trong docs).",
+  "_comment": "Đổi tên file này thành settings.json để bật hook tự động cuối phiên. Hook Stop chạy 2 việc: (1) archive-upload.py lưu FULL TRANSCRIPT lên archive-api; (2) sum_hook.py tóm tắt fact vào mem0. Xem docs/huong-dan-archive-full-transcript.md.",
+  "_env_required": "Cần đặt sẵn các biến môi trường: ARCHIVE_URL, ARCHIVE_AUTH_TOKEN, USER_ID, và (cho mem0) MEM0_USER_ID. Có thể đặt SUMMARIZE_ON_UPLOAD=1 để archive tự sinh LLM summary + embedding.",
   "hooks": {
     "Stop": [
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "python scripts/sum_hook.py" }
+          {
+            "type": "command",
+            "command": "python scripts/archive-upload.py"
+          },
+          {
+            "type": "command",
+            "command": "python scripts/sum_hook.py"
+          }
         ]
       }
     ]
