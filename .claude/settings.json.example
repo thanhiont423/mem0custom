@@ -1,8 +1,9 @@
 {
-  "_comment": "Đổi tên file này thành settings.json để bật hook tự động cuối phiên. Hook Stop chạy 2 việc: (1) archive-upload.py lưu FULL TRANSCRIPT lên archive-api; (2) sum_hook.py tóm tắt fact vào mem0. Xem docs/huong-dan-archive-full-transcript.md.",
-  "_env_required": "Cần đặt sẵn các biến môi trường: ARCHIVE_URL, ARCHIVE_AUTH_TOKEN, USER_ID, và (cho mem0) MEM0_USER_ID. Có thể đặt SUMMARIZE_ON_UPLOAD=1 để archive tự sinh LLM summary + embedding.",
+  "_comment": "Đổi tên file này thành settings.json để bật hook tự động lưu phiên. Hook SessionEnd chạy ĐÚNG MỘT LẦN khi phiên kết thúc (KHÔNG phải mỗi lượt như Stop). Chạy 2 việc: (1) archive-upload.py lưu FULL TRANSCRIPT; (2) sum_hook.py tóm tắt fact vào mem0. Xem docs/huong-dan-archive-full-transcript.md.",
+  "_env_required": "Cần đặt sẵn biến môi trường: ARCHIVE_URL, ARCHIVE_AUTH_TOKEN, USER_ID, MEM0_USER_ID. Tùy chọn SUMMARIZE_ON_UPLOAD=1 để archive tự sinh LLM summary + embedding.",
+  "_matcher_note": "matcher lọc theo lý do kết thúc: clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other. Để rỗng = mọi lý do. Ví dụ 'prompt_input_exit|logout' = chỉ lưu khi thoát thật/đăng xuất, bỏ qua /clear.",
   "hooks": {
-    "Stop": [
+    "SessionEnd": [
       {
         "matcher": "",
         "hooks": [
