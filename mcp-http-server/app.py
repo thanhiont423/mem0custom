@@ -16,6 +16,7 @@ Tools exposed (same as archive-mcp.py stdio version, plus continuation):
 - fetch                           (alias for ChatGPT deep-research compatibility)
 - add_memory                      (save fact/summary to mem0 long-term memory)
 - search_memories                 (semantic recall from mem0)
+- save_full_session               (save FULL transcript to archive)
 """
 from __future__ import annotations
 import os
@@ -232,6 +233,27 @@ TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "save_full_session",
+        "description": (
+            "Save the FULL transcript of a conversation to the archive (Postgres/R2). "
+            "Pass the complete list of messages. Use when the user wants to archive/save "
+            "the entire current session verbatim, not just a summary."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "transcript": {
+                    "type": "array",
+                    "description": "List of message objects (role/content) — the full conversation.",
+                    "items": {"type": "object"},
+                },
+                "summary": {"type": "string", "description": "Optional short summary."},
+                "project_tag": {"type": "string", "description": "Optional project label."},
+            },
+            "required": ["transcript"],
+        },
+    },
     # ChatGPT deep-research compatibility — aliases
     {
         "name": "search",
@@ -342,6 +364,22 @@ async def exec_tool(name: str, args: dict):
             "POST", "/memories/search",
             json={"query": q, "user_id": USER_ID, "limit": args.get("limit", 10)},
         )
+
+    if name == "save_full_session":
+        import datetime
+        transcript = args.get("transcript") or []
+        now = datetime.datetime.utcnow().isoformat()
+        payload = {
+            "user_id": USER_ID,
+            "project_tag": args.get("project_tag", "mcp"),
+            "started_at": now,
+            "ended_at": now,
+            "message_count": len(transcript),
+            "transcript": transcript,
+            "summary": args.get("summary", ""),
+            "metadata": {"source": "save_full_session"},
+        }
+        return await call_archive("POST", "/sessions", json=payload)
 
     raise HTTPException(400, f"Unknown tool: {name}")
 
