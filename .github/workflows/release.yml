@@ -127,7 +127,7 @@ jobs:
           IS_MAJOR="${{ needs.plan.outputs.is_major }}"
 
           MCP_BLOCK=$'## Tính năng MCP cho Claude\n- MCP HTTP server (Streamable HTTP + OAuth 2.1 + DCR) cho Claude App & Claude Code\n- Tool add_memory / search_memories (mem0)\n- Lệnh /sum + hook tự tóm tắt phiên\n- Archive: list/search/get session, load context để tiếp tục hội thoại'
-          CHATGPT_BLOCK=$'## Bản sửa cho ChatGPT (memory-rest-api)\n- REST wrapper mem0 cho ChatGPT Custom GPT (OpenAPI sẵn import)\n- Endpoint /memories, /memories/search, list, delete\n- Đồng bộ Bearer token (CHATGPT_AUTH_TOKEN) với MCP HTTP server'
+          CHATGPT_BLOCK=$'## Bản sửa cho ChatGPT\n### memory-rest-api (server)\n- REST wrapper mem0 cho ChatGPT Custom GPT (OpenAPI sẵn import)\n- Endpoint /memories, /memories/search, list, delete\n- Đồng bộ Bearer token (CHATGPT_AUTH_TOKEN) với MCP HTTP server\n### chatgpt-desktop (app)\n- App desktop ChatGPT (Tauri/Rust), build Windows EXE qua CI'
 
           {
             echo "# $TAG"
