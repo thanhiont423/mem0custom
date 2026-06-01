@@ -73,6 +73,8 @@ fn main() {
             cmd::get_instruction,
             cmd::get_keywords,
             cmd::summarize_current,
+            cmd::check_oauth_status,
+            cmd::refresh_oauth,
             window::open_settings,
         ])
         .setup(|app| {
@@ -199,6 +201,38 @@ fn main() {
                             log::error!("[event] fetch-history failed: {}", e);
                             let _ = h.emit("chat-logger://history-result",
                                 serde_json::json!({"ok":false,"msg":e}));
+                        }
+                    }
+                });
+            });
+
+            // OAuth: kiểm tra trạng thái token (frontend gọi lúc start qua event)
+            let oauth_check_handle = app.handle().clone();
+            app.listen_any("chat-logger://check-oauth", move |_event| {
+                let h = oauth_check_handle.clone();
+                let status = core::oauth_refresh::check_token_status();
+                log::info!("[event] check-oauth -> {}", status);
+                let _ = h.emit("chat-logger://oauth-status",
+                    serde_json::json!({"status": status}));
+            });
+
+            // OAuth: tự gia hạn token bằng refreshToken
+            let oauth_refresh_handle = app.handle().clone();
+            app.listen_any("chat-logger://refresh-oauth", move |_event| {
+                let h = oauth_refresh_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    match core::oauth_refresh::refresh_token().await {
+                        Ok(status) => {
+                            log::info!("[event] refresh-oauth OK -> {}", status);
+                            let _ = h.emit("chat-logger://oauth-status",
+                                serde_json::json!({"status": status, "refreshed": true,
+                                    "msg": "Đã gia hạn token thành công"}));
+                        }
+                        Err(e) => {
+                            log::error!("[event] refresh-oauth failed: {}", e);
+                            let _ = h.emit("chat-logger://oauth-status",
+                                serde_json::json!({"status": "expired", "refreshed": false,
+                                    "msg": format!("Gia hạn thất bại: {}", e)}));
                         }
                     }
                 });

@@ -2,7 +2,7 @@
 
 > Tài liệu SỐNG: mô tả toàn bộ luồng hoạt động của app ChatGPT Desktop.
 > **Quy ước: mỗi phiên sửa tính năng → cập nhật file này + bump mục "Phiên bản".**
-> Cập nhật lần cuối: 2026-05-31 · App v0.7.1 · chat-logger.js v0.7.0
+> Cập nhật lần cuối: 2026-05-31 · App v0.8.0 · chat-logger.js v0.8.0
 
 ---
 
@@ -82,6 +82,7 @@ Config tự sinh khi chạy lần đầu (nhúng trong .exe, ghi vào data dir n
 
 | Version | Thay đổi |
 |---|---|
+| v0.8.0 | Kiểm tra OAT lúc start; hết hạn → nút summary đỏ + nút '🔄 Gia hạn' (tự refresh qua OAuth endpoint); fallback OpenAI khi thiếu credentials.json |
 | v0.7.1 | Tự sinh `summarize.json` + `sync.json` (nhúng `include_str!`) vào data dir lúc chạy đầu; không đè config user |
 | v0.7.0 | Xem lịch sử: keyword `/lichsu` → chèn 5 phiên gần nhất vào chat; OpenAPI archive cho Custom GPT |
 | v0.6.1 | Phản hồi nút thật: emit `chat-logger://result`, nút đổi xanh/đỏ + toast + timeout |

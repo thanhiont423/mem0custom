@@ -295,8 +295,12 @@ pub async fn summarize_current_impl(
 
     let cfg = summarize::load_config(&root)
         .ok_or("summarize disabled or config missing")?;
-    let provider = cfg.providers.get(&cfg.active_provider)
-        .ok_or_else(|| format!("provider '{}' not found in config", cfg.active_provider))?;
+
+    // FALLBACK: nếu provider đang chọn là claude_oat mà KHÔNG có credentials.json,
+    // tự chuyển sang provider OpenAI khả dụng (có api_key) nếu cấu hình sẵn.
+    let active = crate::core::summarize::resolve_active_provider(&cfg);
+    let provider = cfg.providers.get(&active)
+        .ok_or_else(|| format!("provider '{}' not found in config", active))?;
 
     let messages = state.buffer.lock().unwrap().clone();
     if messages.is_empty() {
@@ -340,4 +344,17 @@ pub async fn summarize_current_impl(
     }
 
     Ok(summary)
+}
+
+
+// ============= v0.8.0 — OAuth token check + refresh =============
+
+#[command]
+pub fn check_oauth_status() -> String {
+    crate::core::oauth_refresh::check_token_status()
+}
+
+#[command]
+pub async fn refresh_oauth() -> Result<String, String> {
+    crate::core::oauth_refresh::refresh_token().await
 }
