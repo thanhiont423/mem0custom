@@ -180,6 +180,43 @@ async fn http_post(
     Ok(())
 }
 
+
+/// GET archive-api, trả JSON. Dùng cho đọc lịch sử (CSP của chatgpt.com chặn fetch
+/// trực tiếp từ webview, nên đọc phải đi qua Rust).
+async fn http_get(cfg: &SyncConfig, endpoint: &str) -> Result<Value, String> {
+    let url = format!("{}{}", cfg.archive_url, endpoint);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(cfg.timeout_seconds))
+        .build()
+        .map_err(|e| format!("build client: {}", e))?;
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", cfg.auth_token))
+        .send()
+        .await
+        .map_err(|e| format!("GET {} fail: {}", url, e))?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("HTTP {} -> {}", status, body));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("parse JSON: {}", e))
+}
+
+/// Lấy N session gần nhất từ archive-api (/sessions?user_id=..&limit=N).
+/// Trả về list session (id, started_at, project_tag, summary, message_count).
+pub async fn fetch_recent_sessions(root_dir: PathBuf, limit: u32) -> Result<Value, String> {
+    let cfg = load_config(&root_dir).ok_or_else(|| "sync.json chưa bật/cấu hình".to_string())?;
+    let endpoint = format!("/sessions?user_id={}&limit={}", cfg.user_id, limit);
+    http_get(&cfg, &endpoint).await
+}
+
+/// Lấy full transcript 1 session theo id (/sessions/{id}).
+pub async fn fetch_session_detail(root_dir: PathBuf, session_id: String) -> Result<Value, String> {
+    let cfg = load_config(&root_dir).ok_or_else(|| "sync.json chưa bật/cấu hình".to_string())?;
+    http_get(&cfg, &format!("/sessions/{}", session_id)).await
+}
+
 /// Loop retry với backoff. Trả Err sau khi hết retry_max.
 async fn http_post_with_retry(
     cfg: &SyncConfig,

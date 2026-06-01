@@ -130,5 +130,33 @@ console.log("TEST 12 — toast hien khi co result:");
   ok(toasts.length>=1,"co toast thong bao");
 }
 
+console.log("TEST 13 — keyword /lichsu emit fetch-history:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
+  window.ChatLogger.hookKeywordTrigger(); ta.value="/lichsu";
+  ta.dispatchEvent(new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
+  ok(window.__sent.some(x=>x.ch==="chat-logger://fetch-history"),"/lichsu -> emit fetch-history");
+}
+console.log("TEST 14 — listen history-result + renderHistory chen vao chat:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
+  ok(typeof window.__listeners["chat-logger://history-result"]==="function","da dang ky listener history-result");
+  window.__listeners["chat-logger://history-result"]({ payload:{ok:true, sessions:[
+    {id:"s1",started_at:"2026-06-01",summary:"Tim hieu MarkItDown",message_count:10},
+    {id:"s2",started_at:"2026-05-31",summary:"Regex loc so dien thoai",message_count:20}
+  ]}});
+  const val = ta.value||"";
+  ok(val.includes("2 phiên gần nhất"),"chen header 2 phien");
+  ok(val.includes("MarkItDown")&&val.includes("s1"),"co noi dung phien 1 + id");
+}
+console.log("TEST 15 — history-result loi -> bao loi:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.listenResult();
+  const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
+  window.__listeners["chat-logger://history-result"]({ payload:{ok:false,msg:"401 Unauthorized"} });
+  ok((ta.value||"").includes("401"),"hien thi loi 401");
+}
+
 console.log(`\n==== KET QUA: ${pass} pass, ${fail} fail ====`);
 process.exit(fail>0?1:0);

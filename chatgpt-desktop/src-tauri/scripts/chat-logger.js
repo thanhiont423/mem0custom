@@ -1,6 +1,6 @@
 /**
  * @name chat-logger.js
- * @version 0.6.1
+ * @version 0.7.0
  * @url https://github.com/thanhiont423/mem0custom
  *
  * v0.6.0 — NHE TOI DA (fix lag) + nut noi:
@@ -18,6 +18,9 @@ const DEFAULT_KEYWORDS = {
   "luu": "compact_session",
   "/compact": "compact_session",
   "/lưu": "compact_session",
+  "/lichsu": "fetch_history",
+  "/lịch sử": "fetch_history",
+  "xem lịch sử": "fetch_history",
 };
 
 class ChatLogger {
@@ -46,7 +49,7 @@ class ChatLogger {
       ChatLogger.detectEmitMethod();
       ChatLogger.mountFloatingButtons();
       ChatLogger.listenResult();
-      console.log("[chat-logger v0.6.1] attached (event-driven + result feedback)");
+      console.log("[chat-logger v0.7.0] attached (+ /lichsu xem lịch sử)");
     };
     tryAttach();
   }
@@ -189,6 +192,12 @@ class ChatLogger {
   static listenResult() {
     if (ChatLogger._resultBound) return;
     ChatLogger._resultBound = true;
+    try {
+      if (window.__TAURI__?.event?.listen) {
+        window.__TAURI__.event.listen("chat-logger://history-result",
+          (e) => ChatLogger.renderHistory(e.payload));
+      }
+    } catch (err) { console.error("[chat-logger] listen history failed:", err); }
     const handle = (payload) => {
       const p = payload || {};
       const btn = p.action === "summarize" ? (ChatLogger.btns && ChatLogger.btns.summarize)
@@ -234,6 +243,15 @@ class ChatLogger {
 
   static triggerAction(action) {
     try {
+      if (action === "fetch_history") {
+        ChatLogger.toast(true, "Đang lấy lịch sử...");
+        if (ChatLogger.emitMethod === "event") {
+          window.__TAURI__.event.emit("chat-logger://fetch-history", {});
+        } else if (ChatLogger.emitMethod === "internals") {
+          window.__TAURI_INTERNALS__.postMessage({ cmd: "fetch_history" });
+        }
+        return;
+      }
       if (action === "compact_session") {
         ChatLogger.triggerCompact();
       } else if (ChatLogger.emitMethod === "event") {
@@ -247,6 +265,46 @@ class ChatLogger {
     } catch (err) {
       console.error(`[chat-logger] triggerAction '${action}' failed:`, err);
     }
+  }
+
+  static renderHistory(payload) {
+    const p = payload || {};
+    if (!p.ok) {
+      ChatLogger.insertIntoChat("⚠️ Không lấy được lịch sử: " + (p.msg || "lỗi không rõ"));
+      return;
+    }
+    let sessions = p.sessions;
+    if (sessions && !Array.isArray(sessions) && Array.isArray(sessions.sessions)) sessions = sessions.sessions;
+    if (!Array.isArray(sessions)) sessions = [];
+    if (sessions.length === 0) {
+      ChatLogger.insertIntoChat("📜 Lịch sử trống — chưa có phiên nào được lưu.");
+      return;
+    }
+    const lines = ["📜 **" + sessions.length + " phiên gần nhất:**", ""];
+    sessions.forEach((snap, i) => {
+      const id = snap.id || "?";
+      const when = snap.started_at || snap.created_at || "";
+      const sum = (snap.summary || snap.llm_summary || "(chưa có tóm tắt)").toString().slice(0, 160);
+      const cnt = snap.message_count != null ? ` · ${snap.message_count} tin` : "";
+      lines.push(`${i + 1}. [${when}]${cnt}\n   ${sum}\n   id: ${id}`);
+    });
+    ChatLogger.insertIntoChat(lines.join("\n"));
+  }
+
+  // Chèn text vào ô nhập ChatGPT (để hiện trong khung chat / làm ngữ cảnh).
+  static insertIntoChat(text) {
+    const ta = document.querySelector('textarea, [contenteditable="true"]');
+    if (!ta) { ChatLogger.toast(true, text.slice(0, 80)); return; }
+    if (ta.value !== undefined) {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(ta, text);
+      ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    } else {
+      ta.innerText = text;
+      ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    }
+    ta.focus();
+    ChatLogger.toast(true, "Đã chèn lịch sử vào ô chat — Enter để gửi/đọc");
   }
 
   static triggerCompact() {
