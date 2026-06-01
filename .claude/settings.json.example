@@ -18,5 +18,6 @@
         ]
       }
     ]
-  }
+  },
+  "_path_warning": "QUAN TRONG: command KHONG dat trong duong dan co DAU CACH (vd 'E:\\\\Thanhhn5\\\\41. Khoa hoc') vi Claude Code cat tai dau cach -> dut path. Hay chep script sang thu muc khong dau cach, vd: python C:\\\\Users\\\\thanhhn5\\\\.claude\\\\mem0-hooks\\\\archive-upload.py"
 }
