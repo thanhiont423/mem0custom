@@ -176,6 +176,34 @@ fn main() {
                     }
                 });
             });
+            // Đọc lịch sử: keyword /lichsu từ frontend -> Rust gọi archive-api (CSP-safe)
+            let hist_handle = app.handle().clone();
+            app.listen_any("chat-logger://fetch-history", move |_event| {
+                log::info!("[event] fetch-history triggered");
+                let h = hist_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let root = match core::history::root_dir(&h) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let _ = h.emit("chat-logger://history-result",
+                                serde_json::json!({"ok":false,"msg":format!("root_dir: {}", e)}));
+                            return;
+                        }
+                    };
+                    match core::sync::fetch_recent_sessions(root, 5).await {
+                        Ok(data) => {
+                            let _ = h.emit("chat-logger://history-result",
+                                serde_json::json!({"ok":true,"sessions":data}));
+                        }
+                        Err(e) => {
+                            log::error!("[event] fetch-history failed: {}", e);
+                            let _ = h.emit("chat-logger://history-result",
+                                serde_json::json!({"ok":false,"msg":e}));
+                        }
+                    }
+                });
+            });
+
             setup::init(app)
         })
         .build(tauri::generate_context!())
