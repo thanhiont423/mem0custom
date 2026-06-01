@@ -4,7 +4,7 @@ mod core;
 use core::{cmd, history::{HistoryState, LoggedMessage}, setup, window};
 use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, WriteLogger};
 use std::fs::OpenOptions;
-use tauri::{Listener, Manager};
+use tauri::{Emitter, Listener, Manager};
 
 fn init_logger() {
     let log_dir = {
@@ -132,6 +132,8 @@ fn main() {
                 match core::history::compact_session(&compact_handle, &state, "compact") {
                     Ok(Some(p)) => {
                         log::info!("[event] compact OK: {}", p.display());
+                        let _ = compact_handle.emit("chat-logger://result",
+                            serde_json::json!({"action":"compact","ok":true,"msg":"Đã lưu full session"}));
                         // ===== ASYNC SYNC: đẩy file session lên memory server =====
                         if let Ok(root) = core::history::root_dir(&compact_handle) {
                             let session_path = p.clone();
@@ -140,8 +142,16 @@ fn main() {
                             });
                         }
                     }
-                    Ok(None) => log::info!("[event] compact: empty buffer, only rotated"),
-                    Err(e) => log::error!("[event] compact failed: {}", e),
+                    Ok(None) => {
+                        log::info!("[event] compact: empty buffer, only rotated");
+                        let _ = compact_handle.emit("chat-logger://result",
+                            serde_json::json!({"action":"compact","ok":true,"msg":"Không có nội dung mới để lưu"}));
+                    }
+                    Err(e) => {
+                        log::error!("[event] compact failed: {}", e);
+                        let _ = compact_handle.emit("chat-logger://result",
+                            serde_json::json!({"action":"compact","ok":false,"msg":format!("Lỗi lưu: {}", e)}));
+                    }
                 }
             });
 
@@ -153,8 +163,16 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     let state = h.state::<HistoryState>();
                     match crate::core::cmd::summarize_current_impl(&h, &state).await {
-                        Ok(text) => log::info!("[event] summarize OK: {} chars", text.len()),
-                        Err(e) => log::error!("[event] summarize failed: {}", e),
+                        Ok(text) => {
+                            log::info!("[event] summarize OK: {} chars", text.len());
+                            let _ = h.emit("chat-logger://result",
+                                serde_json::json!({"action":"summarize","ok":true,"msg":"Đã lưu summary vào mem0"}));
+                        }
+                        Err(e) => {
+                            log::error!("[event] summarize failed: {}", e);
+                            let _ = h.emit("chat-logger://result",
+                                serde_json::json!({"action":"summarize","ok":false,"msg":format!("Lỗi tóm tắt: {}", e)}));
+                        }
                     }
                 });
             });
