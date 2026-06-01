@@ -82,7 +82,9 @@ console.log("TEST 6 — nut noi xuat hien dung 2 nut:");
   const fab=window.document.getElementById("cl-fab");
   ok(!!fab,"co hop nut #cl-fab");
   const btns=fab? fab.querySelectorAll("button"):[];
-  ok(btns.length===2,`co dung 2 nut (thuc: ${btns.length})`);
+  ok(btns.length===3,`co 3 nut: summary+full+refresh (thuc: ${btns.length})`);
+  const visible=[...btns].filter(b=>b.style.display!=="none");
+  ok(visible.length===2,`2 nut hien mac dinh (thuc: ${visible.length})`);
   ok([...btns].some(b=>b.textContent.includes("summary")),"co nut Luu summary");
   ok([...btns].some(b=>b.textContent.includes("full session")),"co nut Luu full session");
 }
@@ -156,6 +158,36 @@ console.log("TEST 15 — history-result loi -> bao loi:");
   const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
   window.__listeners["chat-logger://history-result"]({ payload:{ok:false,msg:"401 Unauthorized"} });
   ok((ta.value||"").includes("401"),"hien thi loi 401");
+}
+
+console.log("TEST 16 — start() goi checkOAuth -> emit check-oauth:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.checkOAuth();
+  ok(window.__sent.some(x=>x.ch==="chat-logger://check-oauth"),"emit check-oauth");
+}
+console.log("TEST 17 — oauth-status 'expired' -> nut summary do + hien nut Gia han:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  window.__listeners["chat-logger://oauth-status"]({ payload:{status:"expired"} });
+  const bSum=window.ChatLogger.btns.summarize, bRef=window.ChatLogger.btns.refresh;
+  ok(bSum.style.background==="#d9534f"||bSum.style.background.includes("217"),"nut summary do");
+  ok(bRef.style.display==="block","nut Gia han hien ra");
+}
+console.log("TEST 18 — oauth-status 'valid' -> nut summary xanh + an nut Gia han:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  window.__listeners["chat-logger://oauth-status"]({ payload:{status:"expired"} });
+  window.__listeners["chat-logger://oauth-status"]({ payload:{status:"valid",refreshed:true,msg:"Đã gia hạn"} });
+  const bSum=window.ChatLogger.btns.summarize, bRef=window.ChatLogger.btns.refresh;
+  ok(bSum.style.background==="#10a37f"||bSum.style.background.includes("16, 163"),"nut summary xanh lai");
+  ok(bRef.style.display==="none","nut Gia han an di");
+}
+console.log("TEST 19 — nut Gia han bam -> emit refresh-oauth:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  window.__listeners["chat-logger://oauth-status"]({ payload:{status:"expired"} });
+  window.ChatLogger.btns.refresh.click();
+  ok(window.__sent.some(x=>x.ch==="chat-logger://refresh-oauth"),"emit refresh-oauth");
 }
 
 console.log(`\n==== KET QUA: ${pass} pass, ${fail} fail ====`);

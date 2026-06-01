@@ -1,6 +1,6 @@
 /**
  * @name chat-logger.js
- * @version 0.7.0
+ * @version 0.8.0
  * @url https://github.com/thanhiont423/mem0custom
  *
  * v0.6.0 — NHE TOI DA (fix lag) + nut noi:
@@ -49,7 +49,8 @@ class ChatLogger {
       ChatLogger.detectEmitMethod();
       ChatLogger.mountFloatingButtons();
       ChatLogger.listenResult();
-      console.log("[chat-logger v0.7.0] attached (+ /lichsu xem lịch sử)");
+      ChatLogger.checkOAuth();
+      console.log("[chat-logger v0.8.0] attached (+ kiểm tra/gia hạn OAuth token)");
     };
     tryAttach();
   }
@@ -183,9 +184,14 @@ class ChatLogger {
       () => ChatLogger.triggerAction("summarize_current"));
     const bFull = mkBtn("💾 Lưu full session", "Luu toan bo phien (full transcript)",
       () => ChatLogger.triggerAction("compact_session"));
-    ChatLogger.btns = { summarize: bSum, compact: bFull };
+    const bRefresh = mkBtn("🔄 Gia hạn token", "Token Claude hết hạn — bấm để tự gia hạn",
+      () => ChatLogger.triggerRefreshOAuth());
+    bRefresh.style.background = "#d9534f";
+    bRefresh.style.display = "none";   // chỉ hiện khi token hết hạn
+    ChatLogger.btns = { summarize: bSum, compact: bFull, refresh: bRefresh };
     box.appendChild(bSum);
     box.appendChild(bFull);
+    box.appendChild(bRefresh);
     document.body.appendChild(box);
   }
 
@@ -196,8 +202,10 @@ class ChatLogger {
       if (window.__TAURI__?.event?.listen) {
         window.__TAURI__.event.listen("chat-logger://history-result",
           (e) => ChatLogger.renderHistory(e.payload));
+        window.__TAURI__.event.listen("chat-logger://oauth-status",
+          (e) => ChatLogger.onOAuthStatus(e.payload));
       }
-    } catch (err) { console.error("[chat-logger] listen history failed:", err); }
+    } catch (err) { console.error("[chat-logger] listen extra failed:", err); }
     const handle = (payload) => {
       const p = payload || {};
       const btn = p.action === "summarize" ? (ChatLogger.btns && ChatLogger.btns.summarize)
@@ -305,6 +313,47 @@ class ChatLogger {
     }
     ta.focus();
     ChatLogger.toast(true, "Đã chèn lịch sử vào ô chat — Enter để gửi/đọc");
+  }
+
+  static checkOAuth() {
+    try {
+      if (window.__TAURI__?.event?.emit) {
+        window.__TAURI__.event.emit("chat-logger://check-oauth", {});
+      }
+    } catch (err) { console.error("[chat-logger] checkOAuth failed:", err); }
+  }
+
+  static triggerRefreshOAuth() {
+    const b = ChatLogger.btns && ChatLogger.btns.refresh;
+    if (b) { b.textContent = "⏳ Đang gia hạn..."; b.disabled = true; }
+    try {
+      if (window.__TAURI__?.event?.emit) {
+        window.__TAURI__.event.emit("chat-logger://refresh-oauth", {});
+      }
+    } catch (err) { console.error("[chat-logger] refresh failed:", err); }
+  }
+
+  // Xử lý trạng thái token: valid | expired | missing
+  static onOAuthStatus(payload) {
+    const p = payload || {};
+    const st = p.status || "valid";
+    const bSum = ChatLogger.btns && ChatLogger.btns.summarize;
+    const bRef = ChatLogger.btns && ChatLogger.btns.refresh;
+    if (st === "valid") {
+      if (bSum) { bSum.style.background = "#10a37f"; bSum.title = "Tóm tắt phiên và lưu vào mem0"; bSum.disabled = false; }
+      if (bRef) { bRef.style.display = "none"; bRef.disabled = false; bRef.textContent = "🔄 Gia hạn token"; }
+      if (p.refreshed) ChatLogger.toast(true, p.msg || "Token còn hạn");
+      return;
+    }
+    // expired hoặc missing -> báo đỏ nút summary + hiện nút gia hạn
+    if (bSum) {
+      bSum.style.background = "#d9534f";
+      bSum.title = st === "missing"
+        ? "Chưa có credentials.json — sẽ thử provider OpenAI khi tóm tắt"
+        : "Token Claude hết hạn — bấm 'Gia hạn token'";
+    }
+    if (bRef) { bRef.style.display = "block"; bRef.disabled = false; bRef.textContent = "🔄 Gia hạn token"; }
+    if (p.refreshed === false) ChatLogger.toast(false, p.msg || "Token hết hạn");
   }
 
   static triggerCompact() {

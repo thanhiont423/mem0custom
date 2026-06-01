@@ -123,6 +123,37 @@ pub fn load_config(root: &Path) -> Option<SummarizeConfig> {
     }
 }
 
+/// Quyết định provider thực sự dùng. Nếu active_provider là claude_oat mà KHÔNG có
+/// file credentials.json, tự tìm provider OpenAI/Anthropic có api_key (đã resolve env)
+/// để fallback. Nếu không có -> giữ nguyên active_provider (sẽ báo lỗi rõ khi gọi).
+pub fn resolve_active_provider(cfg: &SummarizeConfig) -> String {
+    let active = cfg.active_provider.clone();
+    let needs_creds = match cfg.providers.get(&active) {
+        Some(Provider::ClaudeOat { credentials_path, .. }) => {
+            !expand_path(credentials_path).exists()
+        }
+        _ => false,
+    };
+    if !needs_creds {
+        return active;
+    }
+    log::warn!("[summarize] credentials.json không tồn tại -> tìm provider OpenAI/Anthropic fallback");
+    // ưu tiên provider OpenAI/Anthropic có api_key không rỗng (sau resolve env)
+    for (name, prov) in &cfg.providers {
+        match prov {
+            Provider::Openai { api_key, .. } | Provider::Anthropic { api_key, .. } => {
+                if !resolve_env(api_key).is_empty() {
+                    log::info!("[summarize] fallback sang provider '{}'", name);
+                    return name.clone();
+                }
+            }
+            _ => {}
+        }
+    }
+    log::warn!("[summarize] không có provider fallback hợp lệ (thiếu api_key)");
+    active
+}
+
 pub async fn summarize(provider: &Provider, transcript: &str) -> Result<String, String> {
     match provider {
         Provider::ClaudeOat { credentials_path, model, max_tokens, system_prompt } => {
