@@ -2,7 +2,7 @@
 
 > Tài liệu SỐNG: mô tả toàn bộ luồng hoạt động của app ChatGPT Desktop.
 > **Quy ước: mỗi phiên sửa tính năng → cập nhật file này + bump mục "Phiên bản".**
-> Cập nhật lần cuối: 2026-05-31 · App v0.8.0 · chat-logger.js v0.8.0
+> Cập nhật lần cuối: 2026-05-31 · App v0.8.0 · chat-logger.js v0.8.1
 
 ---
 
@@ -57,7 +57,13 @@ Config tự sinh khi chạy lần đầu (nhúng trong .exe, ghi vào data dir n
 3. Nhận bản tóm tắt → (tùy chọn) ghi `.md` riêng → `upload_summary()` **POST `/compact-summaries`** với payload: summary_text, messages_before, metadata.
 4. Rust emit `chat-logger://result {action:"summarize", ok, msg}` → nút đổi màu + toast.
 
-## 4. Luồng XEM LỊCH SỬ (keyword /lichsu)
+## 4. Luồng XEM LỊCH SỬ (keyword `lichsu` — KHÔNG dấu /)
+
+- **Tìm** `lichsu <điều kiện>`: semantic-first (theo ý nghĩa) → fallback keyword ILIKE trên **summary** → list (ngày+tóm tắt+id). `lichsu` trống = 5 gần nhất.
+- **Xem chi tiết** `xemphien <id>`: lấy **full transcript** phiên đó (GET /sessions/{id}) → chèn vào chat.
+- Nguyên tắc: TÌM dựa summary (nhẹ); FULL chỉ tải khi xem 1 phiên cụ thể.
+
+### (chi tiết kỹ thuật cũ)
 
 1. Gõ `/lichsu` (hoặc "xem lịch sử") + Enter → `event.emit("chat-logger://fetch-history")`.
 2. Rust `fetch_recent_sessions()` → **GET `/sessions?user_id=..&limit=5`** (qua Rust vì CSP chặn fetch trực tiếp từ JS).
@@ -82,6 +88,7 @@ Config tự sinh khi chạy lần đầu (nhúng trong .exe, ghi vào data dir n
 
 | Version | Thay đổi |
 |---|---|
+| v0.8.1 | Tìm lịch sử THÔNG MINH: `lichsu <điều kiện>` (bỏ dấu /, khớp prefix) → semantic-first + fallback keyword trên summary → list tóm tắt+id; `xemphien <id>` → chèn full transcript. Tìm dựa summary, full chỉ khi xem chi tiết |
 | v0.8.0 | Kiểm tra OAT lúc start; hết hạn → nút summary đỏ + nút '🔄 Gia hạn' (tự refresh qua OAuth endpoint); fallback OpenAI khi thiếu credentials.json |
 | v0.7.1 | Tự sinh `summarize.json` + `sync.json` (nhúng `include_str!`) vào data dir lúc chạy đầu; không đè config user |
 | v0.7.0 | Xem lịch sử: keyword `/lichsu` → chèn 5 phiên gần nhất vào chat; OpenAPI archive cho Custom GPT |

@@ -203,12 +203,27 @@ async fn http_get(cfg: &SyncConfig, endpoint: &str) -> Result<Value, String> {
     serde_json::from_str(&body).map_err(|e| format!("parse JSON: {}", e))
 }
 
-/// Lấy N session gần nhất từ archive-api (/sessions?user_id=..&limit=N).
-/// Trả về list session (id, started_at, project_tag, summary, message_count).
-pub async fn fetch_recent_sessions(root_dir: PathBuf, limit: u32) -> Result<Value, String> {
+/// Tìm session theo điều kiện (q). q rỗng -> 5 phiên gần nhất. Dùng /sessions?q=..
+pub async fn fetch_sessions(root_dir: PathBuf, query: String, limit: u32) -> Result<Value, String> {
     let cfg = load_config(&root_dir).ok_or_else(|| "sync.json chưa bật/cấu hình".to_string())?;
-    let endpoint = format!("/sessions?user_id={}&limit={}", cfg.user_id, limit);
-    http_get(&cfg, &endpoint).await
+    let q = query.trim();
+    // Không có query -> 5 phiên gần nhất.
+    if q.is_empty() {
+        let ep = format!("/sessions?user_id={}&limit={}", cfg.user_id, limit);
+        return http_get(&cfg, &ep).await;
+    }
+    let enc = q.replace(' ', "%20");
+    // TÌM THÔNG MINH: semantic trước (theo ý nghĩa). Nếu lỗi (server chưa bật OpenAI)
+    // hoặc rỗng -> fallback keyword ILIKE trên summary.
+    let sem_ep = format!("/sessions/search-semantic?user_id={}&q={}&limit={}", cfg.user_id, enc, limit);
+    if let Ok(v) = http_get(&cfg, &sem_ep).await {
+        let empty = v.as_array().map(|a| a.is_empty()).unwrap_or(false);
+        if !empty {
+            return Ok(v);
+        }
+    }
+    let kw_ep = format!("/sessions?user_id={}&q={}&limit={}", cfg.user_id, enc, limit);
+    http_get(&cfg, &kw_ep).await
 }
 
 /// Lấy full transcript 1 session theo id (/sessions/{id}).

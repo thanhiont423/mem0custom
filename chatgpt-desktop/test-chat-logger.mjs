@@ -135,7 +135,7 @@ console.log("TEST 12 — toast hien khi co result:");
 console.log("TEST 13 — keyword /lichsu emit fetch-history:");
 { const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
   const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
-  window.ChatLogger.hookKeywordTrigger(); ta.value="/lichsu";
+  window.ChatLogger.hookKeywordTrigger(); ta.value="lichsu";
   ta.dispatchEvent(new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
   ok(window.__sent.some(x=>x.ch==="chat-logger://fetch-history"),"/lichsu -> emit fetch-history");
 }
@@ -188,6 +188,43 @@ console.log("TEST 19 — nut Gia han bam -> emit refresh-oauth:");
   window.__listeners["chat-logger://oauth-status"]({ payload:{status:"expired"} });
   window.ChatLogger.btns.refresh.click();
   ok(window.__sent.some(x=>x.ch==="chat-logger://refresh-oauth"),"emit refresh-oauth");
+}
+
+console.log("TEST 20 — 'lichsu deploy VPS' emit fetch-history kem query:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
+  window.ChatLogger.hookKeywordTrigger(); ta.value="lichsu deploy VPS";
+  ta.dispatchEvent(new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
+  const ev=window.__sent.find(x=>x.ch==="chat-logger://fetch-history");
+  ok(!!ev,"emit fetch-history");
+  ok(ev && ev.p && ev.p.query==="deploy VPS",`query='deploy VPS' (thuc: '${ev&&ev.p&&ev.p.query}')`);
+}
+console.log("TEST 21 — 'lichsu' trong emit query rong (5 gan nhat):");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
+  window.ChatLogger.hookKeywordTrigger(); ta.value="lichsu";
+  ta.dispatchEvent(new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
+  const ev=window.__sent.find(x=>x.ch==="chat-logger://fetch-history");
+  ok(ev && ev.p.query==="","query rong");
+}
+console.log("TEST 22 — 'xemphien <id>' emit fetch-session-detail:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
+  window.ChatLogger.hookKeywordTrigger(); ta.value="xemphien abc-123";
+  ta.dispatchEvent(new window.KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
+  const ev=window.__sent.find(x=>x.ch==="chat-logger://fetch-session-detail");
+  ok(ev && ev.p.id==="abc-123",`emit detail id=abc-123 (thuc: '${ev&&ev.p&&ev.p.id}')`);
+}
+console.log("TEST 23 — renderDetail chen full transcript vao chat:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  const ta=window.document.createElement("textarea"); window.document.querySelector("main").appendChild(ta);
+  ok(typeof window.__listeners["chat-logger://session-detail-result"]==="function","listener detail dang ky");
+  window.__listeners["chat-logger://session-detail-result"]({ payload:{ok:true, session:{
+    id:"s9", started_at:"2026-06-01", transcript:[{role:"user",content:"hoi"},{role:"assistant",content:"dap"}]
+  }}});
+  const val=ta.value||"";
+  ok(val.includes("Phiên s9")&&val.includes("hoi")&&val.includes("dap"),"chen full transcript");
 }
 
 console.log(`\n==== KET QUA: ${pass} pass, ${fail} fail ====`);
