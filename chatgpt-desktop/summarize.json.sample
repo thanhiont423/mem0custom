@@ -1,5 +1,5 @@
 {
-  "enabled": false,
+  "enabled": true,
   "auto_on_compact": false,
   "active_provider": "claude_max",
   "output": {
