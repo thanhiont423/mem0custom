@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+> Xem thêm FLOW.md để biết sequence/flow tổng hợp (cập nhật mỗi phiên).
+
+## [v0.7.1] - 2026-05-31
+### Added
+- Tự sinh `summarize.json` + `sync.json` vào data dir khi chạy lần đầu (nhúng trong .exe qua `include_str!`); không đè config người dùng đã chỉnh.
+
+## [v0.7.0] - 2026-05-31
+### Added
+- Xem lịch sử: keyword `/lichsu` (và "xem lịch sử") → Rust GET `/sessions` → chèn 5 phiên gần nhất vào ô chat (CSP-safe).
+- `memory-rest-api/openapi-archive-for-chatgpt.yaml`: Action archive cho Custom GPT (listSessions/getSession/searchSessions).
+
+## [v0.6.1] - 2026-05-31
+### Added
+- Phản hồi nút: backend emit `chat-logger://result {action, ok, msg}`; nút đổi xanh ✓ / đỏ ✗ + tooltip lý do + toast; timeout 12s.
+
+## [v0.6.0] - 2026-05-31
+### Fixed
+- Fix lag nặng: MutationObserver bỏ `characterData` (fire mỗi token khi stream), chuyển `childList`+`subtree` + debounce 500ms (500 scan/câu → 1).
+### Added
+- 2 nút nổi: "📝 Lưu summary" (summarize_current) + "💾 Lưu full session" (compact).
+- test-chat-logger.mjs (jsdom) cho chat-logger.
+
+
 ## [v0.2.1] - 2026-05-29
 
 ### Added
