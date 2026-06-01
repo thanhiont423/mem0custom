@@ -1,13 +1,15 @@
 /**
  * @name chat-logger.js
- * @version 0.5.0
+ * @version 0.6.0
  * @url https://github.com/thanhiont423/mem0custom
  *
- * v0.5.0:
- *   - FIX CSP: Đọc keywords từ window.__INJECTED_KEYWORDS__ (inject bởi Rust setup.rs)
- *     thay vì invoke('get_keywords') (bị chatgpt.com CSP block ipc.localhost)
- *   - Vẫn dùng event.emit() (postMessage) cho log_message + compact + summarize_current
- *   - Vẫn hook textarea ChatGPT + ô Ask của app
+ * v0.6.0 — NHE TOI DA (fix lag) + nut noi:
+ *   - BO MutationObserver characterData (nguon lag: fire moi token khi stream).
+ *   - Quan sat CHI childList + subtree + debounce 500ms -> quet gon khi co tin moi/xong.
+ *   - Giu hook Enter bat keyword tai DOM (theo yeu cau).
+ *   - Them hop nut noi: [Luu summary] (summarize_current) + [Luu full session] (compact).
+ *
+ * v0.5.0: doc keywords tu window.__INJECTED_KEYWORDS__ (CSP-safe), emit qua event.
  */
 
 const DEFAULT_KEYWORDS = {
@@ -22,6 +24,7 @@ class ChatLogger {
   static loggedIds = new Set();
   static observer = null;
   static emitMethod = null;
+  static scanTimer = null;
   static keywords = (typeof window !== "undefined" && window.__INJECTED_KEYWORDS__)
     ? window.__INJECTED_KEYWORDS__
     : DEFAULT_KEYWORDS;
@@ -34,27 +37,31 @@ class ChatLogger {
         return;
       }
       if (ChatLogger.observer) ChatLogger.observer.disconnect();
-      ChatLogger.observer = new MutationObserver(() => {
-        ChatLogger.scan();
-        ChatLogger.hookKeywordTrigger();
-      });
-      ChatLogger.observer.observe(target, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-      ChatLogger.scan();
+      // NHE: chi childList + subtree, KHONG characterData (khong fire moi token).
+      // Gop cac thay doi bang debounce 500ms -> quet toi da ~2 lan/giay khi co node moi.
+      ChatLogger.observer = new MutationObserver(() => ChatLogger.scheduleScan());
+      ChatLogger.observer.observe(target, { childList: true, subtree: true });
+      ChatLogger.scan();              // quet 1 lan luc gan
       ChatLogger.hookKeywordTrigger();
-      console.log("[chat-logger v0.5.0] attached, keywords:", Object.keys(ChatLogger.keywords));
       ChatLogger.detectEmitMethod();
+      ChatLogger.mountFloatingButtons();
+      console.log("[chat-logger v0.6.0] attached (event-driven, no characterData)");
     };
     tryAttach();
+  }
+
+  // Debounce: gom nhieu mutation thanh 1 lan quet -> tranh quet lien tuc luc stream.
+  static scheduleScan() {
+    if (ChatLogger.scanTimer) clearTimeout(ChatLogger.scanTimer);
+    ChatLogger.scanTimer = setTimeout(() => {
+      ChatLogger.scan();
+      ChatLogger.hookKeywordTrigger();
+    }, 500);
   }
 
   static detectEmitMethod() {
     if (window.__TAURI__?.event?.emit) {
       ChatLogger.emitMethod = "event";
-      console.log("[chat-logger] using event.emit (postMessage, CSP-safe)");
     } else if (window.__TAURI_INTERNALS__?.postMessage) {
       ChatLogger.emitMethod = "internals";
     } else if (window.__TAURI__?.core?.invoke) {
@@ -118,7 +125,7 @@ class ChatLogger {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        console.log(`[chat-logger] keyword '${text}' -> action '${action}'`);
+        console.log(`[chat-logger] keyword '${text}' -> '${action}'`);
         ChatLogger.triggerAction(action);
         if (ta.value !== undefined) {
           const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
@@ -135,16 +142,54 @@ class ChatLogger {
     });
   }
 
+  // ===== Nut noi: Luu summary + Luu full session =====
+  static mountFloatingButtons() {
+    if (document.getElementById("cl-fab")) return;
+    if (!document.body) { setTimeout(ChatLogger.mountFloatingButtons, 800); return; }
+    const box = document.createElement("div");
+    box.id = "cl-fab";
+    box.style.cssText =
+      "position:fixed;right:18px;bottom:96px;z-index:2147483647;display:flex;" +
+      "flex-direction:column;gap:8px;font-family:system-ui,sans-serif;";
+
+    const mkBtn = (label, title, onClick) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.title = title;
+      b.style.cssText =
+        "padding:8px 12px;border:none;border-radius:18px;cursor:pointer;" +
+        "background:#10a37f;color:#fff;font-size:12px;font-weight:600;" +
+        "box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap;opacity:.85;";
+      b.onmouseenter = () => (b.style.opacity = "1");
+      b.onmouseleave = () => (b.style.opacity = ".85");
+      b.onclick = (e) => {
+        e.preventDefault();
+        onClick();
+        const old = b.textContent;
+        b.textContent = "✓ Đã gửi";
+        setTimeout(() => (b.textContent = old), 1500);
+      };
+      return b;
+    };
+
+    box.appendChild(mkBtn("📝 Lưu summary", "Tom tat phien va luu vao mem0",
+      () => ChatLogger.triggerAction("summarize_current")));
+    box.appendChild(mkBtn("💾 Lưu full session", "Luu toan bo phien (full transcript)",
+      () => ChatLogger.triggerAction("compact_session")));
+    document.body.appendChild(box);
+  }
+
   static triggerAction(action) {
     try {
       if (action === "compact_session") {
         ChatLogger.triggerCompact();
       } else if (ChatLogger.emitMethod === "event") {
         window.__TAURI__.event.emit(`chat-logger://${action}`, {});
+      } else if (ChatLogger.emitMethod === "internals") {
+        window.__TAURI_INTERNALS__.postMessage({ cmd: action });
       } else if (ChatLogger.emitMethod === "invoke") {
         window.__TAURI__.core.invoke(action).catch((e) =>
-          console.error(`[chat-logger] invoke '${action}' failed:`, e)
-        );
+          console.error(`[chat-logger] invoke '${action}' failed:`, e));
       }
     } catch (err) {
       console.error(`[chat-logger] triggerAction '${action}' failed:`, err);
@@ -182,9 +227,7 @@ class ChatLogger {
     }
   }
 
-  static compact() {
-    ChatLogger.triggerCompact();
-  }
+  static compact() { ChatLogger.triggerCompact(); }
 }
 
 window.addEventListener("DOMContentLoaded", ChatLogger.start);
