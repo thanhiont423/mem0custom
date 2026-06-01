@@ -180,9 +180,14 @@ fn main() {
             });
             // Đọc lịch sử: keyword /lichsu từ frontend -> Rust gọi archive-api (CSP-safe)
             let hist_handle = app.handle().clone();
-            app.listen_any("chat-logger://fetch-history", move |_event| {
+            app.listen_any("chat-logger://fetch-history", move |event| {
                 log::info!("[event] fetch-history triggered");
                 let h = hist_handle.clone();
+                // đọc query từ payload {"query": "..."} (rỗng nếu không có)
+                let query = serde_json::from_str::<serde_json::Value>(event.payload())
+                    .ok()
+                    .and_then(|v| v.get("query").and_then(|q| q.as_str()).map(|s| s.to_string()))
+                    .unwrap_or_default();
                 tauri::async_runtime::spawn(async move {
                     let root = match core::history::root_dir(&h) {
                         Ok(r) => r,
@@ -192,7 +197,7 @@ fn main() {
                             return;
                         }
                     };
-                    match core::sync::fetch_recent_sessions(root, 5).await {
+                    match core::sync::fetch_sessions(root, query, 5).await {
                         Ok(data) => {
                             let _ = h.emit("chat-logger://history-result",
                                 serde_json::json!({"ok":true,"sessions":data}));
@@ -202,6 +207,34 @@ fn main() {
                             let _ = h.emit("chat-logger://history-result",
                                 serde_json::json!({"ok":false,"msg":e}));
                         }
+                    }
+                });
+            });
+
+            // Xem full transcript 1 phiên theo id: keyword "xemphien <id>"
+            let detail_handle = app.handle().clone();
+            app.listen_any("chat-logger://fetch-session-detail", move |event| {
+                let h = detail_handle.clone();
+                let sid = serde_json::from_str::<serde_json::Value>(event.payload())
+                    .ok()
+                    .and_then(|v| v.get("id").and_then(|q| q.as_str()).map(|s| s.to_string()))
+                    .unwrap_or_default();
+                if sid.is_empty() {
+                    let _ = h.emit("chat-logger://session-detail-result",
+                        serde_json::json!({"ok":false,"msg":"thiếu id phiên"}));
+                    return;
+                }
+                tauri::async_runtime::spawn(async move {
+                    let root = match core::history::root_dir(&h) {
+                        Ok(r) => r,
+                        Err(e) => { let _ = h.emit("chat-logger://session-detail-result",
+                            serde_json::json!({"ok":false,"msg":format!("root_dir: {}", e)})); return; }
+                    };
+                    match core::sync::fetch_session_detail(root, sid).await {
+                        Ok(data) => { let _ = h.emit("chat-logger://session-detail-result",
+                            serde_json::json!({"ok":true,"session":data})); }
+                        Err(e) => { let _ = h.emit("chat-logger://session-detail-result",
+                            serde_json::json!({"ok":false,"msg":e})); }
                     }
                 });
             });

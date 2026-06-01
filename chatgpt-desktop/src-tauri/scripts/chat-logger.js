@@ -1,6 +1,6 @@
 /**
  * @name chat-logger.js
- * @version 0.8.0
+ * @version 0.8.1
  * @url https://github.com/thanhiont423/mem0custom
  *
  * v0.6.0 — NHE TOI DA (fix lag) + nut noi:
@@ -18,10 +18,11 @@ const DEFAULT_KEYWORDS = {
   "luu": "compact_session",
   "/compact": "compact_session",
   "/lưu": "compact_session",
-  "/lichsu": "fetch_history",
-  "/lịch sử": "fetch_history",
-  "xem lịch sử": "fetch_history",
 };
+
+// Lệnh prefix (gõ kèm điều kiện phía sau): "/lichsu deploy VPS" -> tìm theo "deploy VPS".
+const PREFIX_COMMANDS = ["lichsu", "lịch sử", "lich su", "history"];
+const DETAIL_COMMANDS = ["xemphien", "xem phiên", "xem phien", "chitiet"];
 
 class ChatLogger {
   static loggedIds = new Set();
@@ -125,6 +126,25 @@ class ChatLogger {
       ta.dataset.kwHooked = "1";
       const handler = (e) => {
         const text = (ta.value !== undefined ? ta.value : ta.innerText || "").trim();
+        // Lệnh lịch sử dạng prefix: "/lichsu [điều kiện]" -> tìm theo điều kiện (rỗng = 5 gần nhất)
+        const low = text.toLowerCase();
+        const pref = PREFIX_COMMANDS.find((c) => low === c || low.startsWith(c + " "));
+        if (pref) {
+          e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+          const query = text.slice(pref.length).trim();
+          console.log(`[chat-logger] history query='${query}'`);
+          ChatLogger.triggerFetchHistory(query);
+          ChatLogger.clearInput(ta);
+          return;
+        }
+        const det = DETAIL_COMMANDS.find((c) => low.startsWith(c + " "));
+        if (det) {
+          e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+          const id = text.slice(det.length).trim();
+          ChatLogger.triggerFetchDetail(id);
+          ChatLogger.clearInput(ta);
+          return;
+        }
         const action = ChatLogger.matchKeyword(text);
         if (!action) return;
         e.preventDefault();
@@ -132,14 +152,7 @@ class ChatLogger {
         e.stopImmediatePropagation();
         console.log(`[chat-logger] keyword '${text}' -> '${action}'`);
         ChatLogger.triggerAction(action);
-        if (ta.value !== undefined) {
-          const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-          setter.call(ta, "");
-          ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
-        } else {
-          ta.innerText = "";
-          ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
-        }
+        ChatLogger.clearInput(ta);
       };
       ta.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) handler(e);
@@ -204,6 +217,8 @@ class ChatLogger {
           (e) => ChatLogger.renderHistory(e.payload));
         window.__TAURI__.event.listen("chat-logger://oauth-status",
           (e) => ChatLogger.onOAuthStatus(e.payload));
+        window.__TAURI__.event.listen("chat-logger://session-detail-result",
+          (e) => ChatLogger.renderDetail(e.payload));
       }
     } catch (err) { console.error("[chat-logger] listen extra failed:", err); }
     const handle = (payload) => {
@@ -252,12 +267,7 @@ class ChatLogger {
   static triggerAction(action) {
     try {
       if (action === "fetch_history") {
-        ChatLogger.toast(true, "Đang lấy lịch sử...");
-        if (ChatLogger.emitMethod === "event") {
-          window.__TAURI__.event.emit("chat-logger://fetch-history", {});
-        } else if (ChatLogger.emitMethod === "internals") {
-          window.__TAURI_INTERNALS__.postMessage({ cmd: "fetch_history" });
-        }
+        ChatLogger.triggerFetchHistory("");
         return;
       }
       if (action === "compact_session") {
@@ -313,6 +323,58 @@ class ChatLogger {
     }
     ta.focus();
     ChatLogger.toast(true, "Đã chèn lịch sử vào ô chat — Enter để gửi/đọc");
+  }
+
+  static triggerFetchDetail(id) {
+    if (!id) { ChatLogger.toast(false, "Thiếu id phiên (vd: xemphien <id>)"); return; }
+    ChatLogger.toast(true, "Đang lấy chi tiết phiên...");
+    try {
+      if (ChatLogger.emitMethod === "event") {
+        window.__TAURI__.event.emit("chat-logger://fetch-session-detail", { id });
+      } else if (ChatLogger.emitMethod === "internals") {
+        window.__TAURI_INTERNALS__.postMessage({ cmd: "fetch_session_detail", id });
+      }
+    } catch (err) { console.error("[chat-logger] fetchDetail failed:", err); }
+  }
+
+  static renderDetail(payload) {
+    const p = payload || {};
+    if (!p.ok) { ChatLogger.insertIntoChat("⚠️ Không lấy được chi tiết: " + (p.msg || "lỗi")); return; }
+    const sn = p.session || {};
+    let tr = sn.transcript;
+    if (typeof tr === "string") { try { tr = JSON.parse(tr); } catch (e) {} }
+    if (!Array.isArray(tr)) tr = [];
+    const head = `📄 Phiên ${sn.id || ""} — ${sn.started_at || ""} · ${tr.length} tin\n`;
+    const body = tr.map((m) => {
+      const role = m.role || m.author || "?";
+      const content = (m.content || m.text || "").toString().slice(0, 2000);
+      return `[${role}] ${content}`;
+    }).join("\n\n");
+    ChatLogger.insertIntoChat(head + "\n" + body);
+  }
+
+  static clearInput(ta) {
+    if (ta.value !== undefined) {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(ta, "");
+      ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    } else {
+      ta.innerText = "";
+      ta.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    }
+  }
+
+  // Lấy lịch sử: query rỗng = 5 phiên gần nhất; có query = tìm theo điều kiện.
+  static triggerFetchHistory(query) {
+    ChatLogger.toast(true, query ? `Đang tìm lịch sử: ${query}` : "Đang lấy 5 phiên gần nhất...");
+    const payload = { query: query || "" };
+    try {
+      if (ChatLogger.emitMethod === "event") {
+        window.__TAURI__.event.emit("chat-logger://fetch-history", payload);
+      } else if (ChatLogger.emitMethod === "internals") {
+        window.__TAURI_INTERNALS__.postMessage({ cmd: "fetch_history", ...payload });
+      }
+    } catch (err) { console.error("[chat-logger] fetchHistory failed:", err); }
   }
 
   static checkOAuth() {
