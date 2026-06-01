@@ -1,4 +1,5 @@
 use std::{
+    fs,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -50,8 +51,37 @@ use crate::core::{
     template,
 };
 
+/// Tự sinh config mặc định (summarize.json + sync.json) vào data dir khi CHẠY LẦN ĐẦU.
+/// Config được NHÚNG SẴN trong binary (include_str!), nên không cần file ngoài,
+/// không phải trỏ đường dẫn đi đâu. Chỉ ghi nếu file CHƯA tồn tại (không đè cấu hình
+/// người dùng đã chỉnh).
+fn ensure_default_configs(app: &tauri::AppHandle) {
+    let root = match crate::core::history::root_dir(app) {
+        Ok(r) => r,
+        Err(e) => { log::warn!("[setup] ensure_default_configs: root_dir lỗi: {}", e); return; }
+    };
+    let defaults: [(&str, &str); 2] = [
+        ("summarize.json", include_str!("../../default-config/summarize.default.json")),
+        ("sync.json",      include_str!("../../default-config/sync.default.json")),
+    ];
+    for (name, content) in defaults {
+        let path = root.join(name);
+        if path.exists() {
+            log::debug!("[setup] {} đã tồn tại -> giữ nguyên", name);
+            continue;
+        }
+        match fs::write(&path, content) {
+            Ok(_) => log::info!("[setup] sinh config mặc định: {}", path.display()),
+            Err(e) => log::warn!("[setup] không ghi được {}: {}", name, e),
+        }
+    }
+}
+
 pub fn init(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle();
+
+    // Tự sinh summarize.json + sync.json vào data dir nếu chưa có (config nhúng trong .exe).
+    ensure_default_configs(handle);
 
     let conf = &AppConf::load(handle)?;
     let ask_mode_height = if conf.ask_mode { ASK_HEIGHT } else { 0.0 };
