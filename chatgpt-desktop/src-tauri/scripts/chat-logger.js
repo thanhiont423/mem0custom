@@ -1,6 +1,6 @@
 /**
  * @name chat-logger.js
- * @version 0.6.0
+ * @version 0.6.1
  * @url https://github.com/thanhiont423/mem0custom
  *
  * v0.6.0 — NHE TOI DA (fix lag) + nut noi:
@@ -45,7 +45,8 @@ class ChatLogger {
       ChatLogger.hookKeywordTrigger();
       ChatLogger.detectEmitMethod();
       ChatLogger.mountFloatingButtons();
-      console.log("[chat-logger v0.6.0] attached (event-driven, no characterData)");
+      ChatLogger.listenResult();
+      console.log("[chat-logger v0.6.1] attached (event-driven + result feedback)");
     };
     tryAttach();
   }
@@ -162,21 +163,73 @@ class ChatLogger {
         "box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap;opacity:.85;";
       b.onmouseenter = () => (b.style.opacity = "1");
       b.onmouseleave = () => (b.style.opacity = ".85");
+      b.dataset.label = label;
       b.onclick = (e) => {
         e.preventDefault();
+        b.textContent = "⏳ Đang lưu...";
+        b.disabled = true;
         onClick();
-        const old = b.textContent;
-        b.textContent = "✓ Đã gửi";
-        setTimeout(() => (b.textContent = old), 1500);
+        // fallback: nếu 12s không có phản hồi -> coi như timeout
+        clearTimeout(b._t);
+        b._t = setTimeout(() => ChatLogger.setBtnState(b, false, "Không có phản hồi (timeout)"), 12000);
       };
       return b;
     };
 
-    box.appendChild(mkBtn("📝 Lưu summary", "Tom tat phien va luu vao mem0",
-      () => ChatLogger.triggerAction("summarize_current")));
-    box.appendChild(mkBtn("💾 Lưu full session", "Luu toan bo phien (full transcript)",
-      () => ChatLogger.triggerAction("compact_session")));
+    const bSum = mkBtn("📝 Lưu summary", "Tom tat phien va luu vao mem0",
+      () => ChatLogger.triggerAction("summarize_current"));
+    const bFull = mkBtn("💾 Lưu full session", "Luu toan bo phien (full transcript)",
+      () => ChatLogger.triggerAction("compact_session"));
+    ChatLogger.btns = { summarize: bSum, compact: bFull };
+    box.appendChild(bSum);
+    box.appendChild(bFull);
     document.body.appendChild(box);
+  }
+
+  static listenResult() {
+    if (ChatLogger._resultBound) return;
+    ChatLogger._resultBound = true;
+    const handle = (payload) => {
+      const p = payload || {};
+      const btn = p.action === "summarize" ? (ChatLogger.btns && ChatLogger.btns.summarize)
+                : p.action === "compact"   ? (ChatLogger.btns && ChatLogger.btns.compact)
+                : null;
+      if (btn) ChatLogger.setBtnState(btn, !!p.ok, p.msg || "");
+      ChatLogger.toast(p.ok, p.msg || (p.ok ? "Thành công" : "Thất bại"));
+    };
+    try {
+      if (window.__TAURI__?.event?.listen) {
+        window.__TAURI__.event.listen("chat-logger://result", (e) => handle(e.payload));
+      }
+    } catch (err) { console.error("[chat-logger] listenResult failed:", err); }
+  }
+
+  static setBtnState(btn, ok, msg) {
+    if (!btn) return;
+    clearTimeout(btn._t);
+    btn.disabled = false;
+    btn.title = msg || btn.title;
+    btn.textContent = ok ? "✓ " + (btn.dataset.label || "Đã lưu") : "✗ Lỗi";
+    btn.style.background = ok ? "#10a37f" : "#d9534f";
+    setTimeout(() => {
+      btn.textContent = btn.dataset.label || btn.textContent;
+      btn.style.background = "#10a37f";
+    }, 2500);
+  }
+
+  static toast(ok, msg) {
+    if (!document.body) return;
+    const t = document.createElement("div");
+    t.textContent = (ok ? "✓ " : "✗ ") + msg;
+    t.style.cssText =
+      "position:fixed;right:18px;bottom:150px;z-index:2147483647;max-width:280px;" +
+      "padding:10px 14px;border-radius:8px;color:#fff;font-size:13px;font-family:system-ui,sans-serif;" +
+      "box-shadow:0 4px 12px rgba(0,0,0,.3);opacity:0;transition:opacity .2s;" +
+      "background:" + (ok ? "#10a37f" : "#d9534f") + ";";
+    document.body.appendChild(t);
+    const raf = (typeof requestAnimationFrame !== "undefined") ? requestAnimationFrame : (cb)=>setTimeout(cb,16);
+    raf(() => (t.style.opacity = "1"));
+    setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, 3500);
   }
 
   static triggerAction(action) {

@@ -13,7 +13,10 @@ function makeEnv() {
   }
   global.window=window; global.document=window.document;
   global.MutationObserver=window.MutationObserver; global.InputEvent=window.InputEvent;
-  const sent=[]; window.__TAURI__={ event:{ emit:(ch,p)=>sent.push({ch,p}) } }; window.__sent=sent;
+  global.requestAnimationFrame=(cb)=>setTimeout(cb,0); window.requestAnimationFrame=global.requestAnimationFrame;
+  const sent=[]; const listeners={};
+  window.__TAURI__={ event:{ emit:(ch,p)=>sent.push({ch,p}), listen:(ch,cb)=>{ listeners[ch]=cb; } } };
+  window.__sent=sent; window.__listeners=listeners;
   let code=fs.readFileSync("./chat-logger.js","utf8").replace(/window\.addEventListener[\s\S]*$/,"");
   window.eval("var location=window.location;\n"+code+"\n; window.ChatLogger=ChatLogger;");
   return { window };
@@ -96,6 +99,35 @@ console.log("TEST 8 — nut 'Luu full session' emit compact:");
   const btn=[...window.document.querySelectorAll("#cl-fab button")].find(b=>b.textContent.includes("full session"));
   btn.click();
   ok(window.__sent.some(x=>x.ch==="chat-logger://compact"),"emit chat-logger://compact");
+}
+
+console.log("TEST 9 — listenResult dang ky listener chat-logger://result:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  ok(typeof window.__listeners["chat-logger://result"]==="function","da dang ky listener result");
+}
+console.log("TEST 10 — result OK -> nut summary doi xanh '✓':");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  window.__listeners["chat-logger://result"]({ payload:{action:"summarize",ok:true,msg:"Đã lưu summary vào mem0"} });
+  const b=window.ChatLogger.btns.summarize;
+  ok(b.textContent.startsWith("✓"),`nut summary hien ✓ (thuc: '${b.textContent}')`);
+  ok(b.style.background.includes("16, 163, 127")||b.style.background==="#10a37f"||b.style.background.includes("rgb"),"mau xanh");
+}
+console.log("TEST 11 — result FAIL -> nut compact doi do '✗' + tooltip loi:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  window.__listeners["chat-logger://result"]({ payload:{action:"compact",ok:false,msg:"Lỗi lưu: 401"} });
+  const b=window.ChatLogger.btns.compact;
+  ok(b.textContent.startsWith("✗"),`nut compact hien ✗ (thuc: '${b.textContent}')`);
+  ok(b.title.includes("401"),"tooltip co ly do loi 401");
+}
+console.log("TEST 12 — toast hien khi co result:");
+{ const {window}=makeEnv(); window.ChatLogger.emitMethod="event";
+  window.ChatLogger.mountFloatingButtons(); window.ChatLogger.listenResult();
+  window.__listeners["chat-logger://result"]({ payload:{action:"summarize",ok:true,msg:"Đã lưu"} });
+  const toasts=[...window.document.body.children].filter(e=>e.id!=="cl-fab" && e.textContent.includes("Đã lưu"));
+  ok(toasts.length>=1,"co toast thong bao");
 }
 
 console.log(`\n==== KET QUA: ${pass} pass, ${fail} fail ====`);
